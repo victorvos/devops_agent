@@ -7,6 +7,10 @@ Provides targeted, cost-efficient access to:
   - Pull request creation
 
 Uses httpx for async HTTP instead of cloning the full repo.
+
+Auth modes:
+  - system_token: Bearer auth with $(System.AccessToken) — preferred in pipelines.
+  - pat: Basic auth with base64-encoded PAT — for local dev / external triggers.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from src.config import Settings
+from src.config import DevOpsAuthMode, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +48,34 @@ class RepoTree:
     files: list[str] = field(default_factory=list)
 
 
+def _build_auth_header(settings: Settings) -> str:
+    """Build the Authorization header value based on auth mode.
+
+    Args:
+        settings: Application settings with auth config.
+
+    Returns:
+        Authorization header value (e.g. "Bearer ..." or "Basic ...").
+    """
+    if settings.devops_auth_mode == DevOpsAuthMode.SYSTEM_TOKEN:
+        logger.info("Using System.AccessToken (Bearer) for DevOps API auth")
+        return f"Bearer {settings.system_access_token}"
+
+    logger.info("Using PAT (Basic) for DevOps API auth")
+    token = base64.b64encode(f":{settings.azure_devops_pat}".encode()).decode()
+    return f"Basic {token}"
+
+
 class AzureDevOpsClient:
     """Async client for Azure DevOps Git & Work Item REST APIs.
 
     Designed for *targeted retrieval* — fetches only the files the agent
     needs rather than cloning the entire repository.
+
+    Supports two auth modes:
+      - system_token: Uses $(System.AccessToken) from the pipeline (Bearer).
+        No PAT secret needed — the pipeline's build identity is used.
+      - pat: Uses a Personal Access Token (Basic). For local dev.
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -58,11 +85,9 @@ class AzureDevOpsClient:
         self._repo = settings.azure_devops_repository
         self._branch = settings.default_branch
 
-        # PAT auth: base64-encode ":{pat}"
-        token = base64.b64encode(f":{settings.azure_devops_pat}".encode()).decode()
         self._client = httpx.AsyncClient(
             headers={
-                "Authorization": f"Basic {token}",
+                "Authorization": _build_auth_header(settings),
                 "Content-Type": "application/json",
             },
             timeout=httpx.Timeout(30.0, connect=10.0),

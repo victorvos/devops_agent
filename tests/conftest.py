@@ -17,19 +17,38 @@ from src.config import Settings
 
 @pytest.fixture
 def settings() -> Settings:
-    """Default test settings with fake credentials."""
+    """Default test settings with PAT auth (local dev mode)."""
     return Settings(
         azure_devops_org_url="https://dev.azure.com/test-org",
-        azure_devops_pat="fake-pat-token",
         azure_devops_project="test-project",
         azure_devops_repository="test-repo",
+        devops_auth_mode="pat",
+        azure_devops_pat="fake-pat-token",
+    )
+
+
+@pytest.fixture
+def settings_system_token() -> Settings:
+    """Test settings with System.AccessToken auth (pipeline mode)."""
+    return Settings(
+        azure_devops_org_url="https://dev.azure.com/test-org",
+        azure_devops_project="test-project",
+        azure_devops_repository="test-repo",
+        devops_auth_mode="system_token",
+        system_access_token="fake-system-token",
     )
 
 
 @pytest.fixture
 def devops_client(settings: Settings) -> AzureDevOpsClient:
-    """Azure DevOps client initialized with test settings."""
+    """Azure DevOps client initialized with PAT auth."""
     return AzureDevOpsClient(settings)
+
+
+@pytest.fixture
+def devops_client_system(settings_system_token: Settings) -> AzureDevOpsClient:
+    """Azure DevOps client initialized with System.AccessToken auth."""
+    return AzureDevOpsClient(settings_system_token)
 
 
 @pytest.fixture

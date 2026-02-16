@@ -224,9 +224,10 @@ Key settings in `.env`:
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `AZURE_DEVOPS_ORG_URL` | Your org URL | `https://dev.azure.com/contoso` |
-| `AZURE_DEVOPS_PAT` | Personal Access Token | `xxxx...` |
 | `AZURE_DEVOPS_PROJECT` | Project name | `MyProject` |
 | `AZURE_DEVOPS_REPOSITORY` | Repo name | `backend-api` |
+| `DEVOPS_AUTH_MODE` | `system_token` (pipeline) or `pat` (local) | `pat` |
+| `AZURE_DEVOPS_PAT` | PAT — only needed when auth mode = `pat` | `xxxx...` |
 | `AZURE_AI_FOUNDRY_ENDPOINT` | AI Foundry endpoint | `https://proj.services.ai.azure.com` |
 | `AZURE_AI_FOUNDRY_API_KEY` | Foundry API key | `xxxx...` |
 | `AZURE_AI_FOUNDRY_MODEL` | Model deployment | `gpt-5.3` |
@@ -234,6 +235,8 @@ Key settings in `.env`:
 | `PROGET_PYPI_URL` | ProGet PyPI feed URL | `https://proget.contoso.com/pypi/...` |
 | `PROGET_USERNAME` | ProGet username (usually `api`) | `api` |
 | `PROGET_API_KEY` | ProGet API key | `xxxx...` |
+
+> **Pipeline auth:** Inside Azure Pipelines the agent uses `System.AccessToken` (Bearer auth) — no PAT needed. The pipeline template sets `DEVOPS_AUTH_MODE=system_token` and injects the token automatically. For local development, use `DEVOPS_AUTH_MODE=pat` with your PAT.
 
 ---
 
@@ -352,7 +355,6 @@ The pipeline at `pipelines/azure-pipeline.yml` can be run from the Azure DevOps 
 | Variable | Description |
 |----------|-------------|
 | `AZURE_DEVOPS_ORG_URL` | Organization URL |
-| `AZURE_DEVOPS_PAT` | Personal Access Token |
 | `AZURE_DEVOPS_PROJECT` | Project name |
 | `AZURE_DEVOPS_REPOSITORY` | Target repository |
 | `LLM_PROVIDER` | `azure_ai_foundry` |
@@ -362,6 +364,8 @@ The pipeline at `pipelines/azure-pipeline.yml` can be run from the Azure DevOps 
 | `PROGET_PYPI_URL` | ProGet PyPI feed URL |
 | `PROGET_USERNAME` | ProGet user (usually `api`) |
 | `PROGET_API_KEY` | ProGet API key |
+
+> **No PAT needed here.** The pipeline uses `$(System.AccessToken)` for DevOps API calls (PRs, work items, branches). Grant the **Build Service** account the required permissions in Project Settings > Repositories and Boards.
 
 ### Programmatic usage
 

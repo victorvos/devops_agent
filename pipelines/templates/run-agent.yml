@@ -48,15 +48,19 @@ steps:
         ${{ if eq(parameters.reportOnly, true) }}--report-only${{ else }}${{ end }}
     displayName: "Run DevOps Agent (uv run)"
     env:
+      # DevOps API auth — use the pipeline's built-in token (no PAT needed)
+      DEVOPS_AUTH_MODE: "system_token"
+      SYSTEM_ACCESS_TOKEN: $(System.AccessToken)
       AZURE_DEVOPS_ORG_URL: $(AZURE_DEVOPS_ORG_URL)
-      AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)
       AZURE_DEVOPS_PROJECT: $(AZURE_DEVOPS_PROJECT)
       AZURE_DEVOPS_REPOSITORY: $(AZURE_DEVOPS_REPOSITORY)
+      # LLM
       LLM_PROVIDER: $(LLM_PROVIDER)
       AZURE_AI_FOUNDRY_ENDPOINT: $(AZURE_AI_FOUNDRY_ENDPOINT)
       AZURE_AI_FOUNDRY_API_KEY: $(AZURE_AI_FOUNDRY_API_KEY)
       AZURE_AI_FOUNDRY_MODEL: $(AZURE_AI_FOUNDRY_MODEL)
       AZURE_AI_FOUNDRY_API_VERSION: $(AZURE_AI_FOUNDRY_API_VERSION)
+      # Agent
       MAX_FILES_PER_REQUEST: "20"
       MAX_TOKENS_CONTEXT: "120000"
       LOG_LEVEL: "INFO"
