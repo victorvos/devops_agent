@@ -215,8 +215,52 @@ class AzureDevOpsClient:
         resp.raise_for_status()
         return resp.json().get("comments", [])
 
+    async def add_work_item_comment(self, work_item_id: int, text: str) -> dict[str, Any]:
+        """Append a comment to a work item. Never removes existing content.
+
+        This is the preferred way to post agent results — comments are
+        immutable entries in the work item history and cannot overwrite
+        or delete existing information.
+
+        Args:
+            work_item_id: The work item to comment on.
+            text: Comment body (supports HTML).
+        """
+        url = self._wit_url(f"/workitems/{work_item_id}/comments")
+        params: dict[str, Any] = {"api-version": f"{API_VERSION}-preview"}
+        resp = await self._client.post(
+            url,
+            json={"text": text},
+            params=params,
+        )
+        resp.raise_for_status()
+        logger.info("Added comment to work item #%d", work_item_id)
+        return resp.json()
+
     async def update_work_item(self, work_item_id: int, operations: list[dict[str, Any]]) -> dict[str, Any]:
-        """Update a work item using JSON Patch operations."""
+        """Update a work item using JSON Patch operations.
+
+        SAFETY: Only 'add' operations are allowed. The 'replace' and
+        'remove' ops are rejected to prevent accidental data loss from
+        AI hallucinations or bugs. Use add_work_item_comment() to post
+        agent results instead.
+
+        Args:
+            work_item_id: Work item to update.
+            operations: JSON Patch operations (only 'add' allowed).
+
+        Raises:
+            ValueError: If any operation uses 'replace' or 'remove'.
+        """
+        for op in operations:
+            op_type = op.get("op", "").lower()
+            if op_type in ("replace", "remove"):
+                raise ValueError(
+                    f"Unsafe operation '{op_type}' blocked on work item #{work_item_id}. "
+                    f"Only 'add' operations are allowed to prevent data loss. "
+                    f"Path: {op.get('path', '?')}"
+                )
+
         url = self._wit_url(f"/workitems/{work_item_id}")
         params = {"api-version": API_VERSION}
         resp = await self._client.patch(

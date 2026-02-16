@@ -45,9 +45,9 @@ parameters:
       - api
       - cli
   - name: reportOnly
-    displayName: "Report only"
+    displayName: "Report only (no branch/PR) — safer default"
     type: boolean
-    default: false
+    default: true
 
 variables:
   - group: devops-agent-secrets

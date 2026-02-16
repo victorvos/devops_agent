@@ -24,9 +24,9 @@ parameters:
     type: string
     default: ""
   - name: reportOnly
-    displayName: "Report only (no branch/PR)"
+    displayName: "Report only (no branch/PR) — safer default"
     type: boolean
-    default: false
+    default: true
 
 variables:
   - group: devops-agent-secrets

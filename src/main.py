@@ -125,9 +125,9 @@ def investigate(
     work_item: int = typer.Option(..., "--work-item", "-w", help="Azure DevOps work item ID"),
     context: str = typer.Option("", "--context", "-c", help="Additional context for the agent"),
     request_type: str = typer.Option("investigation", "--type", "-t", help="Request type: investigation, feature_request, bug"),
-    report_only: bool = typer.Option(False, "--report-only", "-r", help="Generate report without creating branch/PR"),
+    report_only: bool = typer.Option(True, "--report-only", "-r", help="Report only (default). Use --no-report-only to create branch/PR"),
 ) -> None:
-    """Investigate a work item: fetch relevant code, analyze, and optionally create a PR."""
+    """Investigate a work item: fetch relevant code, analyze, and post findings as a comment."""
     asyncio.run(_run_agent(work_item, context, request_type, report_only))
 
 
@@ -147,7 +147,7 @@ def trigger(
     pipeline_id: int = typer.Option(..., "--pipeline-id", "-p", help="Azure DevOps pipeline ID"),
     context: str = typer.Option("", "--context", "-c", help="Additional context"),
     request_type: str = typer.Option("investigation", "--type", "-t", help="Request type"),
-    report_only: bool = typer.Option(False, "--report-only", "-r", help="Report only"),
+    report_only: bool = typer.Option(True, "--report-only", "-r", help="Report only (default). Use --no-report-only to create branch/PR"),
 ) -> None:
     """Trigger the agent pipeline via Azure DevOps REST API.
 

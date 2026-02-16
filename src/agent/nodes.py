@@ -223,31 +223,45 @@ async def create_output(
     state: AgentState,
     devops: AzureDevOpsClient,
 ) -> dict[str, Any]:
-    """Create a branch, push results, and optionally open a PR."""
+    """Post the agent's findings. Always appends — never overwrites.
+
+    Default behaviour (report_only / INVESTIGATION_REPORT):
+        Post the analysis as a work item comment. Existing work item
+        content is never modified or removed.
+
+    When branch/PR is requested:
+        Also creates a branch, pushes files, and opens a PR.
+        The report is still appended as a comment for traceability.
+    """
     updates: dict[str, Any] = {}
+    work_id = state.work_item_id or 0
+    report_md = _build_markdown_report(state)
+
+    # Always append the report as a work item comment (safe, append-only)
+    if work_id:
+        try:
+            comment_html = _markdown_to_html_comment(report_md, state)
+            await devops.add_work_item_comment(work_id, comment_html)
+            logger.info("Posted agent report as comment on WI #%d", work_id)
+        except Exception as exc:
+            logger.warning("Failed to post comment on WI #%d: %s", work_id, exc)
 
     if state.recommended_action == AgentAction.INVESTIGATION_REPORT:
-        # Just produce a summary — no branch/PR needed
         updates["output_summary"] = state.analysis
         return updates
 
     # For feature skeletons, bug fixes, or PR-with-changes: create a branch
-    work_id = state.work_item_id or 0
     branch_name = f"agent/{state.recommended_action.value}/{work_id}"
 
     try:
         await devops.create_branch(branch_name)
         updates["output_branch"] = branch_name
 
-        # Prepare files to push
         files_to_push: dict[str, str] = {}
 
-        # Always include the investigation report
         report_path = f"/docs/agent-reports/{work_id}-analysis.md"
-        report_content = _build_markdown_report(state)
-        files_to_push[report_path] = report_content
+        files_to_push[report_path] = report_md
 
-        # Include suggested file changes
         for path, content in state.suggested_file_changes.items():
             files_to_push[path] = content
 
@@ -258,7 +272,6 @@ async def create_output(
                 commit_message=f"Agent: {state.recommended_action.value} for #{work_id}\n\n{state.work_item_title}",
             )
 
-        # Create PR
         pr = await devops.create_pull_request(
             source_branch=branch_name,
             title=f"[Agent] {state.work_item_title or 'Investigation'} (#{work_id})",
@@ -274,7 +287,7 @@ async def create_output(
     except Exception as exc:
         logger.error("Failed to create output: %s", exc)
         updates["error"] = f"Output creation failed: {exc}"
-        updates["output_summary"] = state.analysis  # Fall back to report only
+        updates["output_summary"] = state.analysis
 
     return updates
 
@@ -321,6 +334,43 @@ def _build_markdown_report(state: AgentState) -> str:
             sections.append(f"- {err}")
 
     return "\n".join(sections)
+
+
+def _markdown_to_html_comment(report_md: str, state: AgentState) -> str:
+    """Convert the markdown report to an HTML comment for the work item.
+
+    Azure DevOps work item comments support HTML. We wrap the report
+    in a clear header so it's easy to identify agent output in history.
+    """
+    escaped = (
+        report_md
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    lines = escaped.split("\n")
+    html_lines = []
+    for line in lines:
+        if line.startswith("# "):
+            html_lines.append(f"<h3>{line[2:]}</h3>")
+        elif line.startswith("## "):
+            html_lines.append(f"<h4>{line[3:]}</h4>")
+        elif line.startswith("- "):
+            html_lines.append(f"<li>{line[2:]}</li>")
+        elif line.startswith("**"):
+            html_lines.append(f"<p><b>{line.strip('*')}</b></p>")
+        elif line.strip():
+            html_lines.append(f"<p>{line}</p>")
+        else:
+            html_lines.append("<br/>")
+
+    body = "\n".join(html_lines)
+    return (
+        f'<div style="border-left:3px solid #4a148c;padding-left:12px;margin:8px 0">'
+        f"<p><b>🤖 Agent Report</b> — <i>appended by DevOps Agent (iteration {state.iteration})</i></p>"
+        f"{body}"
+        f"</div>"
+    )
 
 
 def _build_pr_description(state: AgentState) -> str:

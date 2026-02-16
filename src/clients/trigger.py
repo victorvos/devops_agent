@@ -46,7 +46,7 @@ class PipelineTrigger:
         request_type: str = "investigation",
         additional_context: str = "",
         trigger_source: str = "api",
-        report_only: bool = False,
+        report_only: bool = True,
     ) -> dict[str, Any]:
         """Queue a pipeline run with the given parameters.
 

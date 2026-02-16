@@ -23,7 +23,7 @@ parameters:
     default: ""
   - name: reportOnly
     type: boolean
-    default: false
+    default: true
   - name: triggerSource
     type: string
     default: "manual"    # manual | devops_mention | teams_mention | webhook

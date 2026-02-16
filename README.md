@@ -254,8 +254,8 @@ uv run devops-agent investigate --work-item 1234 --context "Focus on the retry l
 # Feature request analysis
 uv run devops-agent investigate --work-item 1234 --type feature_request
 
-# Report only (no branch/PR creation)
-uv run devops-agent investigate --work-item 1234 --report-only
+# Default is report-only (safe). Explicitly opt-in to branch/PR:
+uv run devops-agent investigate --work-item 1234 --no-report-only
 
 # Free-form request (no work item)
 uv run devops-agent request --text "How does the auth flow work?"
@@ -348,7 +348,7 @@ The pipeline at `pipelines/azure-pipeline.yml` can be run from the Azure DevOps 
 | `workItemId` | number | Work item to investigate |
 | `requestType` | string | `investigation`, `feature_request`, or `bug` |
 | `additionalContext` | string | Extra context for the agent |
-| `reportOnly` | boolean | Skip branch/PR creation |
+| `reportOnly` | boolean | Report only — no branch/PR (default: **true**) |
 
 **Variable group setup:** Create `devops-agent-secrets` in **Pipelines > Library**:
 
@@ -455,6 +455,23 @@ steps:
       requestType: "investigation"
       triggerSource: "devops_mention"
 ```
+
+---
+
+## Safety: Append-Only Work Item Updates
+
+The agent **never removes or overwrites** existing work item content. All findings are posted as **new comments** — immutable entries in the work item history.
+
+| Operation | Allowed | Method |
+|-----------|---------|--------|
+| Add comment to work item | Yes | `add_work_item_comment()` — appends to history |
+| Add tag / link to work item | Yes | `update_work_item()` with `op: "add"` only |
+| Replace description / title | **Blocked** | Raises `ValueError` at runtime |
+| Remove fields / tags | **Blocked** | Raises `ValueError` at runtime |
+
+This protects against AI hallucinations or bugs accidentally destroying existing work. The `update_work_item()` method enforces this by rejecting `replace` and `remove` JSON Patch operations.
+
+Default mode is **report-only** (`reportOnly: true`) — the agent posts its analysis as a comment and stops. Branch/PR creation must be explicitly opted into.
 
 ---
 
