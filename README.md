@@ -60,46 +60,47 @@ graph LR
 
 ```mermaid
 flowchart TB
-    subgraph triggers["Trigger Sources<br/>(all just call the Pipeline REST API)"]
-        T1["Azure DevOps service hook<br/>→ Power Automate<br/>→ Pipeline API"]
-        T2["MS Teams @agent<br/>→ Power Automate<br/>→ Pipeline API"]
-        T3["CLI<br/>devops-agent trigger"]
-        T4["Pipeline UI<br/>(manual run)"]
+    subgraph triggers["Trigger Sources"]
+        T1["Azure DevOps service hook\n→ Power Automate → Pipeline API"]
+        T2["MS Teams @agent\n→ Power Automate → Pipeline API"]
+        T3["CLI: devops-agent trigger"]
+        T4["Pipeline UI: manual run"]
     end
 
-    subgraph pipeline["Azure Pipeline<br/>(webhook-trigger.yml)<br/>container: python:3.12-slim"]
+    subgraph pipeline["Azure Pipeline — python:3.12-slim"]
         direction TB
-        P1["Checkout agent code<br/>(shallow, fetchDepth: 1)"]
-        P2["uv sync via ProGet<br/>(templates/python-setup.yml)"]
-        P3["Run agent<br/>(templates/run-agent.yml)"]
+        P1["Checkout agent code"]
+        P2["uv sync via ProGet"]
+        P3["Run agent"]
         P1 --> P2 --> P3
     end
 
     subgraph agent["LangGraph Agent"]
         direction TB
-        N1["receive_request<br/>Fetch work item + repo tree"]
-        N2["plan_files<br/>LLM picks 5-20 relevant files"]
-        N3["fetch_files<br/>Git REST API (targeted)"]
-        N4["reason<br/>Analyze code vs. work item"]
-        N5["create_output<br/>Branch + PR or report"]
+        N1["receive_request\nFetch work item + repo tree"]
+        N2["plan_files\nLLM picks 5-20 relevant files"]
+        N3["fetch_files\nGit REST API targeted"]
+        N4["reason\nAnalyze code vs work item"]
+        N5["create_output\nBranch + PR or report"]
 
         N1 --> N2 --> N3 --> N4
         N4 -->|"needs more context"| N2
         N4 -->|"done"| N5
     end
 
-    subgraph external["External Services"]
-        AZ["Azure DevOps<br/>REST API"]
-        LLM["Azure AI Foundry<br/>GPT 5.3"]
-    end
+    AZ["Azure DevOps REST API"]
+    LLM["Azure AI Foundry — GPT 5.3"]
 
-    T1 -->|"POST .../pipelines/{id}/runs"| pipeline
-    T2 -->|"POST .../pipelines/{id}/runs"| pipeline
-    T3 -->|"POST .../pipelines/{id}/runs"| pipeline
+    T1 -->|"POST pipelines/runs"| pipeline
+    T2 -->|"POST pipelines/runs"| pipeline
+    T3 -->|"POST pipelines/runs"| pipeline
     T4 --> pipeline
     P3 --> agent
-    N1 & N3 & N5 <--> AZ
-    N2 & N4 <--> LLM
+    N1 <--> AZ
+    N3 <--> AZ
+    N5 <--> AZ
+    N2 <--> LLM
+    N4 <--> LLM
 
     %% Styling
     style T1 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
