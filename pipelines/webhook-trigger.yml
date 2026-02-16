@@ -1,0 +1,77 @@
+# ────────────────────────────────────────────────────────────────
+# Azure Pipeline: DevOps Agent (Webhook Trigger)
+# ────────────────────────────────────────────────────────────────
+# Triggered by:
+#   1. Azure DevOps service hook → when @agent is mentioned in
+#      a work item comment
+#   2. MS Teams bot webhook → when @agent is mentioned in a
+#      Teams channel linked to the project
+#   3. Generic webhook → any external system via the webhook API
+#
+# The webhook receiver (src/webhooks/receiver.py) parses the
+# incoming payload and calls the Azure DevOps Pipeline REST API
+# with the correct parameters.
+#
+# This pipeline is triggered via the Azure DevOps API:
+#   POST https://dev.azure.com/{org}/{project}/_apis/pipelines/{pipelineId}/runs
+#
+# Webhook payloads are mapped to pipeline variables by the
+# receiver before triggering.
+
+trigger: none
+pr: none
+
+parameters:
+  - name: workItemId
+    displayName: "Work Item ID"
+    type: number
+  - name: requestType
+    displayName: "Request type"
+    type: string
+    default: "investigation"
+    values:
+      - investigation
+      - feature_request
+      - bug
+  - name: additionalContext
+    displayName: "Context from the @agent mention"
+    type: string
+    default: ""
+  - name: triggerSource
+    displayName: "Where the trigger came from"
+    type: string
+    default: "webhook"
+    values:
+      - devops_mention
+      - teams_mention
+      - webhook
+  - name: reportOnly
+    displayName: "Report only"
+    type: boolean
+    default: false
+
+variables:
+  - group: devops-agent-secrets
+
+pool:
+  vmImage: "ubuntu-latest"
+
+container: python:3.12-slim
+
+steps:
+  - checkout: self
+    fetchDepth: 1
+    displayName: "Checkout agent code"
+
+  - template: templates/python-setup.yml
+    parameters:
+      pythonVersion: "3.12"
+      installDev: false
+
+  - template: templates/run-agent.yml
+    parameters:
+      workItemId: ${{ parameters.workItemId }}
+      requestType: ${{ parameters.requestType }}
+      additionalContext: ${{ parameters.additionalContext }}
+      reportOnly: ${{ parameters.reportOnly }}
+      triggerSource: ${{ parameters.triggerSource }}

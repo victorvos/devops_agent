@@ -1,0 +1,71 @@
+# ────────────────────────────────────────────────────────────────
+# Template: Run DevOps Agent
+# ────────────────────────────────────────────────────────────────
+# Reusable template that executes the agent with the given
+# parameters. Expects Python + uv to be set up already
+# (use python-setup.yml first).
+#
+# Usage:
+#   steps:
+#     - template: templates/run-agent.yml
+#       parameters:
+#         workItemId: 1234
+#         requestType: "investigation"
+
+parameters:
+  - name: workItemId
+    type: number
+  - name: requestType
+    type: string
+    default: "investigation"
+  - name: additionalContext
+    type: string
+    default: ""
+  - name: reportOnly
+    type: boolean
+    default: false
+  - name: triggerSource
+    type: string
+    default: "manual"    # manual | devops_mention | teams_mention | webhook
+
+steps:
+  - script: |
+      echo "╔══════════════════════════════════════╗"
+      echo "║      Azure DevOps Agent Run          ║"
+      echo "╠══════════════════════════════════════╣"
+      echo "║  Work Item:  #${{ parameters.workItemId }}"
+      echo "║  Type:       ${{ parameters.requestType }}"
+      echo "║  Trigger:    ${{ parameters.triggerSource }}"
+      echo "║  Report Only: ${{ parameters.reportOnly }}"
+      echo "╚══════════════════════════════════════╝"
+    displayName: "Agent run info"
+
+  - script: |
+      uv run python -m src.main investigate \
+        --work-item ${{ parameters.workItemId }} \
+        --type "${{ parameters.requestType }}" \
+        --context "${{ parameters.additionalContext }}" \
+        ${{ if eq(parameters.reportOnly, true) }}--report-only${{ else }}${{ end }}
+    displayName: "Run DevOps Agent (uv run)"
+    env:
+      AZURE_DEVOPS_ORG_URL: $(AZURE_DEVOPS_ORG_URL)
+      AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)
+      AZURE_DEVOPS_PROJECT: $(AZURE_DEVOPS_PROJECT)
+      AZURE_DEVOPS_REPOSITORY: $(AZURE_DEVOPS_REPOSITORY)
+      LLM_PROVIDER: $(LLM_PROVIDER)
+      AZURE_AI_FOUNDRY_ENDPOINT: $(AZURE_AI_FOUNDRY_ENDPOINT)
+      AZURE_AI_FOUNDRY_API_KEY: $(AZURE_AI_FOUNDRY_API_KEY)
+      AZURE_AI_FOUNDRY_MODEL: $(AZURE_AI_FOUNDRY_MODEL)
+      AZURE_AI_FOUNDRY_API_VERSION: $(AZURE_AI_FOUNDRY_API_VERSION)
+      MAX_FILES_PER_REQUEST: "20"
+      MAX_TOKENS_CONTEXT: "120000"
+      LOG_LEVEL: "INFO"
+      TRIGGER_SOURCE: "${{ parameters.triggerSource }}"
+
+  - task: PublishPipelineArtifact@1
+    inputs:
+      targetPath: "$(System.DefaultWorkingDirectory)"
+      artifact: "agent-output-${{ parameters.workItemId }}"
+      publishLocation: "pipeline"
+    condition: always()
+    displayName: "Publish agent output"
