@@ -1,80 +1,112 @@
-"""Tests for the LangGraph agent nodes and graph."""
+"""Unit tests for the LangGraph agent nodes.
+
+All LLM calls are mocked. Tests follow Arrange-Act-Assert.
+"""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.agent.nodes import _extract_json, plan_files, reason
-from src.agent.state import AgentAction, AgentState, PlannedFile
+from src.agent.state import AgentAction, AgentState
 from src.utils.tokens import build_context_block, count_tokens, truncate_to_budget
 
 
-# ── JSON extraction ──────────────────────────────────────────────
-
-
 class TestExtractJSON:
+    """JSON extraction from LLM output."""
+
     def test_plain_json(self) -> None:
-        result = _extract_json('{"key": "value"}')
+        # Arrange
+        text = '{"key": "value"}'
+
+        # Act
+        result = _extract_json(text)
+
+        # Assert
         assert result == {"key": "value"}
 
     def test_markdown_fenced_json(self) -> None:
+        # Arrange
         text = '```json\n{"key": "value"}\n```'
+
+        # Act
         result = _extract_json(text)
+
+        # Assert
         assert result == {"key": "value"}
 
     def test_json_with_surrounding_text(self) -> None:
+        # Arrange
         text = 'Here is the result:\n{"key": "value"}\nEnd.'
+
+        # Act
         result = _extract_json(text)
+
+        # Assert
         assert result == {"key": "value"}
 
-    def test_invalid_json_raises(self) -> None:
+    def test_invalid_json_raises_value_error(self) -> None:
+        # Act & Assert
         with pytest.raises(ValueError, match="Could not extract JSON"):
             _extract_json("not json at all")
 
 
-# ── Token utilities ──────────────────────────────────────────────
-
-
 class TestTokenUtils:
-    def test_count_tokens_basic(self) -> None:
+    """Token counting and budget management."""
+
+    def test_count_tokens_returns_positive(self) -> None:
+        # Act
         tokens = count_tokens("Hello world")
-        assert tokens > 0
-        assert tokens < 10
 
-    def test_truncate_within_budget(self) -> None:
+        # Assert
+        assert 0 < tokens < 10
+
+    def test_truncate_within_budget_returns_unchanged(self) -> None:
+        # Arrange
         text = "Hello world"
+
+        # Act
         result = truncate_to_budget(text, max_tokens=100)
-        assert result == text  # no truncation needed
 
-    def test_truncate_exceeds_budget(self) -> None:
-        text = "word " * 1000  # ~1000 tokens
+        # Assert
+        assert result == text
+
+    def test_truncate_exceeding_budget_adds_marker(self) -> None:
+        # Arrange
+        text = "word " * 1000
+
+        # Act
         result = truncate_to_budget(text, max_tokens=50)
-        assert "truncated" in result.lower()
-        assert count_tokens(result) <= 60  # small buffer for truncation message
 
-    def test_build_context_block_respects_budget(self) -> None:
+        # Assert
+        assert "truncated" in result.lower()
+        assert count_tokens(result) <= 60
+
+    def test_build_context_block_respects_token_budget(self) -> None:
+        # Arrange
         files = [
             ("/file1.py", "x = 1\n" * 100),
             ("/file2.py", "y = 2\n" * 100),
             ("/file3.py", "z = 3\n" * 100),
         ]
+
+        # Act
         result = build_context_block(files, max_tokens=200)
-        total = count_tokens(result)
-        assert total <= 250  # allow small buffer
 
-
-# ── Plan files node ──────────────────────────────────────────────
+        # Assert
+        assert count_tokens(result) <= 250
 
 
 class TestPlanFiles:
-    async def test_plan_files_parses_llm_response(self) -> None:
-        mock_llm = AsyncMock()
+    """LLM-based file planning node."""
+
+    async def test_parses_valid_llm_response(self, mock_llm: AsyncMock) -> None:
+        # Arrange
         mock_llm.ainvoke.return_value = MagicMock(
             content='{"reasoning": "Auth module is relevant", "files": [{"path": "/src/auth.py", "reason": "main auth logic"}]}'
         )
-
         state = AgentState(
             work_item_id=123,
             work_item_title="Fix auth bug",
@@ -82,36 +114,38 @@ class TestPlanFiles:
             repo_tree_summary="  [dir]  /src\n  [file] /src/auth.py\n  [file] /src/main.py",
         )
 
+        # Act
         result = await plan_files(state, llm=mock_llm)
 
+        # Assert
         assert len(result["planned_files"]) == 1
         assert result["planned_files"][0].path == "/src/auth.py"
         assert "Auth" in result["plan_reasoning"]
 
-    async def test_plan_files_handles_parse_error(self) -> None:
-        mock_llm = AsyncMock()
+    async def test_handles_unparseable_llm_response(self, mock_llm: AsyncMock) -> None:
+        # Arrange
         mock_llm.ainvoke.return_value = MagicMock(content="Not valid JSON response")
-
         state = AgentState(
             work_item_id=123,
             repo_tree_summary="  [dir]  /src",
         )
 
+        # Act
         result = await plan_files(state, llm=mock_llm)
+
+        # Assert
         assert result["planned_files"] == []
         assert "Parse error" in result["plan_reasoning"]
 
 
-# ── Reason node ──────────────────────────────────────────────────
-
-
 class TestReason:
-    async def test_reason_produces_analysis(self) -> None:
-        mock_llm = AsyncMock()
+    """LLM-based reasoning node."""
+
+    async def test_produces_bug_analysis(self, mock_llm: AsyncMock) -> None:
+        # Arrange
         mock_llm.ainvoke.return_value = MagicMock(
             content='{"analysis": "The auth module has a bug in line 42.", "recommended_action": "bug_analysis", "suggested_file_changes": {}}'
         )
-
         state = AgentState(
             work_item_id=123,
             work_item_title="Auth bug",
@@ -120,23 +154,26 @@ class TestReason:
             fetched_files=[("/src/auth.py", "def login():\n    pass")],
         )
 
+        # Act
         result = await reason(state, llm=mock_llm, max_context_tokens=5000)
 
+        # Assert
         assert "bug" in result["analysis"].lower()
         assert result["recommended_action"] == AgentAction.BUG_ANALYSIS
 
-    async def test_reason_handles_unparseable_response(self) -> None:
-        mock_llm = AsyncMock()
+    async def test_falls_back_on_unparseable_response(self, mock_llm: AsyncMock) -> None:
+        # Arrange
         mock_llm.ainvoke.return_value = MagicMock(
             content="Here is my free-form analysis of the code..."
         )
-
         state = AgentState(
             work_item_id=123,
             fetched_files=[("/src/main.py", "print('hello')")],
         )
 
+        # Act
         result = await reason(state, llm=mock_llm, max_context_tokens=5000)
 
+        # Assert
         assert result["analysis"] == "Here is my free-form analysis of the code..."
         assert result["recommended_action"] == AgentAction.INVESTIGATION_REPORT

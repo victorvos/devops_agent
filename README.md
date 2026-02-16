@@ -6,6 +6,17 @@ Built with [LangGraph](https://github.com/langchain-ai/langgraph), [Azure AI Fou
 
 Triggered via **`@agent`** mentions in Azure DevOps work item comments or Microsoft Teams.
 
+## Table of Contents
+
+- [Why targeted retrieval?](#why-targeted-retrieval)
+- [Architecture](#architecture)
+- [Setup](#setup)
+- [Usage](#usage)
+- [Pipeline templates](#pipeline-templates)
+- [Cost efficiency](#cost-efficiency)
+- [Development](#development)
+- [Project structure](#project-structure)
+
 ---
 
 ## Why Targeted Retrieval?
@@ -23,10 +34,14 @@ graph LR
         F -->|5k-30k tokens| G[High quality analysis]
     end
 
-    style A fill:#f66,color:#fff
-    style C fill:#f66,color:#fff
-    style D fill:#6c6,color:#fff
-    style G fill:#6c6,color:#fff
+    %% Styling
+    style A fill:#f44336,stroke:#c62828,stroke-width:2px,color:#white
+    style B fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
+    style C fill:#f44336,stroke:#c62828,stroke-width:2px,color:#white
+    style D fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style E fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
+    style F fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
+    style G fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#white
 ```
 
 | Metric | Full Repo Approach | This Agent |
@@ -41,7 +56,7 @@ graph LR
 
 ## Architecture
 
-### End-to-End Flow
+### End-to-end flow
 
 ```mermaid
 flowchart TB
@@ -85,9 +100,25 @@ flowchart TB
     P3 --> agent
     N1 & N3 & N5 <--> AZ
     N2 & N4 <--> LLM
+
+    %% Styling
+    style T1 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style T2 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style T3 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style T4 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style P1 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
+    style P2 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
+    style P3 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
+    style N1 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
+    style N2 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
+    style N3 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
+    style N4 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
+    style N5 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
+    style AZ fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style LLM fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
 ```
 
-### LangGraph Agent Detail
+### LangGraph agent detail
 
 ```mermaid
 stateDiagram-v2
@@ -139,7 +170,7 @@ stateDiagram-v2
     create_output --> [*]
 ```
 
-### Pipeline Template Reuse
+### Pipeline template reuse
 
 ```mermaid
 graph TB
@@ -160,8 +191,12 @@ graph TB
     WEB --> TPY
     WEB --> TRA
 
-    style TPY fill:#36f,color:#fff
-    style TRA fill:#36f,color:#fff
+    %% Styling
+    style TPY fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style TRA fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style CI fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
+    style MAN fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
+    style WEB fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
 ```
 
 ---
@@ -185,8 +220,6 @@ cd devops_agent
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Configure ProGet credentials for uv
-# (uv reads these env vars to authenticate with the ProGet index
-# defined in pyproject.toml under [tool.uv.index])
 export UV_HTTP_BASIC_PROGET_USERNAME=api
 export UV_HTTP_BASIC_PROGET_PASSWORD=your-proget-api-key
 
@@ -202,7 +235,6 @@ uv sync --no-dev
 ### Configuration
 
 ```bash
-# Copy and fill in your credentials
 cp .env.example .env
 ```
 
@@ -218,7 +250,7 @@ Key settings in `.env`:
 | `AZURE_AI_FOUNDRY_API_KEY` | Foundry API key | `xxxx...` |
 | `AZURE_AI_FOUNDRY_MODEL` | Model deployment | `gpt-5.3` |
 | `AGENT_PIPELINE_ID` | Webhook-trigger pipeline ID | `42` |
-| `PROGET_PYPI_URL` | ProGet PyPI feed URL | `https://proget.contoso.com/pypi/python-packages/simple/` |
+| `PROGET_PYPI_URL` | ProGet PyPI feed URL | `https://proget.contoso.com/pypi/...` |
 | `PROGET_USERNAME` | ProGet username (usually `api`) | `api` |
 | `PROGET_API_KEY` | ProGet API key | `xxxx...` |
 
@@ -248,7 +280,7 @@ uv run devops-agent request --text "How does the auth flow work?"
 ### Trigger via CLI
 
 ```bash
-# Trigger the agent pipeline from the command line (just an API call)
+# Trigger the agent pipeline (just an API call with credentials)
 uv run devops-agent trigger --work-item 1234 --pipeline-id 42
 
 # With extra context
@@ -334,7 +366,7 @@ The pipeline at `pipelines/azure-pipeline.yml` can be run from the Azure DevOps 
 | `additionalContext` | string | Extra context for the agent |
 | `reportOnly` | boolean | Skip branch/PR creation |
 
-**Variable group setup:** Create a variable group named `devops-agent-secrets` in **Pipelines > Library** containing:
+**Variable group setup:** Create `devops-agent-secrets` in **Pipelines > Library**:
 
 | Variable | Description |
 |----------|-------------|
@@ -350,7 +382,7 @@ The pipeline at `pipelines/azure-pipeline.yml` can be run from the Azure DevOps 
 | `PROGET_USERNAME` | ProGet user (usually `api`) |
 | `PROGET_API_KEY` | ProGet API key |
 
-### Programmatic Usage
+### Programmatic usage
 
 ```python
 import asyncio
@@ -386,9 +418,9 @@ All pipelines reuse shared templates in `pipelines/templates/`:
 
 ### `python-setup.yml`
 
-Sets up the Python environment using `uv` with ProGet as the package index. All pipelines run inside a `python:3.12-slim` container — Python is already available, so uv just manages the venv and packages.
+Sets up the Python environment using `uv` with ProGet. All pipelines run inside `python:3.12-slim` — Python is already available, so uv just manages the venv and packages.
 
-**The venv is cached between runs** via Azure Pipelines `Cache@2`, keyed on `uv.lock`. If dependencies haven't changed, `uv sync` is a near-instant no-op (~1-2s instead of 30-60s).
+**The venv is cached between runs** via `Cache@2`, keyed on `uv.lock`. If dependencies haven't changed, `uv sync` is a no-op (~1-2s instead of 30-60s).
 
 ```yaml
 container: python:3.12-slim
@@ -396,14 +428,14 @@ container: python:3.12-slim
 steps:
   - template: templates/python-setup.yml
     parameters:
-      installDev: true    # false for production runs
+      installDev: true
 ```
 
 What it does:
-1. Installs `uv` via pip (already available in the slim container)
+1. Installs `uv` via pip (available in the slim container)
 2. **Restores cached `.venv/` and uv package cache** (keyed on `uv.lock`)
-3. Runs `uv sync --python-preference=only-system` — if cache hit, this is a no-op
-4. On cache miss (deps changed), downloads from ProGet and saves cache for next run
+3. Runs `uv sync --python-preference=only-system` — cache hit = no-op
+4. On cache miss, downloads from ProGet and saves cache for next run
 5. Verifies the environment
 
 ```mermaid
@@ -417,6 +449,13 @@ flowchart LR
     end
 
     UV_LOCK["uv.lock"] -->|"cache key"| C
+
+    %% Styling
+    style C fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
+    style NOOP fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#white
+    style SYNC fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
+    style SAVE fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style UV_LOCK fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
 ```
 
 ### `run-agent.yml`
@@ -438,18 +477,26 @@ steps:
 
 ```mermaid
 graph LR
-    subgraph "Per Request Cost Breakdown"
+    subgraph "Per request cost breakdown"
         direction TB
         A1["Azure DevOps API<br/>~10-30 calls<br/>FREE (included)"] --- A2["Azure AI Foundry<br/>~5k-30k tokens<br/>$0.02-$0.20"]
         A2 --- A3["Azure Pipeline<br/>~30s-2min<br/>~$0.004/min"]
     end
 
-    subgraph "Monthly Estimate (100 requests)"
+    subgraph "Monthly estimate (100 requests)"
         direction TB
         B1["LLM: $2 - $20"]
         B2["Pipeline: $0.40 - $3.30"]
         B3["Total: ~$3 - $25/month"]
     end
+
+    %% Styling
+    style A1 fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#white
+    style A2 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
+    style A3 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style B1 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
+    style B2 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
+    style B3 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
 ```
 
 GPT 5.3 via Azure AI Foundry supports ~400k token context windows, but this agent deliberately stays under 120k to maximize cost efficiency and reasoning quality.
@@ -458,38 +505,31 @@ GPT 5.3 via Azure AI Foundry supports ~400k token context windows, but this agen
 
 ## Development
 
-### Running Tests
+### Running tests
 
 ```bash
 # Run all tests
 uv run pytest
 
-# Verbose with coverage
-uv run pytest -v --cov=src --cov-report=html
+# Unit tests only
+uv run pytest tests/unit/ -v
 
-# Specific test file
-uv run pytest tests/test_agent.py -v
+# With coverage
+uv run pytest -v --cov=src --cov-report=html
 ```
 
-### Linting & Formatting
+### Linting & formatting
 
 ```bash
-# Check lint
-uv run ruff check src/ tests/
-
-# Auto-fix
-uv run ruff check --fix src/ tests/
-
-# Format
-uv run ruff format src/ tests/
-
-# Type check
-uv run mypy src/ --ignore-missing-imports
+uv run ruff check src/ tests/        # Lint
+uv run ruff check --fix src/ tests/  # Auto-fix
+uv run ruff format src/ tests/       # Format
+uv run mypy src/ --ignore-missing-imports  # Type check
 ```
 
-### CI Pipeline
+### CI pipeline
 
-The `pipelines/ci.yml` runs on every push/PR and executes:
+The `pipelines/ci.yml` runs on every push/PR:
 
 ```mermaid
 graph LR
@@ -500,6 +540,14 @@ graph LR
     C --> F[Publish results]
     D --> F
     E --> F
+
+    %% Styling
+    style A fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style B fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
+    style C fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
+    style D fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
+    style E fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
+    style F fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#white
 ```
 
 ---
@@ -519,7 +567,7 @@ devops_agent/
 │   ├── clients/
 │   │   ├── devops.py           # Azure DevOps REST API client (httpx)
 │   │   ├── llm.py              # LLM client factory (AI Foundry / OpenAI / Anthropic)
-│   │   └── trigger.py          # Pipeline trigger via REST API (no server needed)
+│   │   └── trigger.py          # Pipeline trigger via REST API
 │   └── utils/
 │       └── tokens.py           # Token counting & context budget management
 ├── pipelines/
@@ -530,9 +578,11 @@ devops_agent/
 │       ├── python-setup.yml    # Reusable: uv + ProGet (python:3.12-slim)
 │       └── run-agent.yml       # Reusable: agent execution
 ├── tests/
-│   ├── test_agent.py           # Agent node tests
-│   └── test_devops_client.py   # DevOps client tests
-├── .env.example                # Environment variable template
+│   ├── conftest.py             # Shared fixtures
+│   └── unit/
+│       ├── test_agent.py       # Agent node tests
+│       └── test_devops_client.py  # DevOps client tests
+├── .env.example
 ├── .gitignore
 ├── pyproject.toml              # Project metadata & deps (uv-managed)
 └── README.md
