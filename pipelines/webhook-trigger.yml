@@ -1,22 +1,20 @@
 # ────────────────────────────────────────────────────────────────
-# Azure Pipeline: DevOps Agent (Webhook Trigger)
+# Azure Pipeline: DevOps Agent (Webhook / API Trigger)
 # ────────────────────────────────────────────────────────────────
-# Triggered by:
-#   1. Azure DevOps service hook → when @agent is mentioned in
-#      a work item comment
-#   2. MS Teams bot webhook → when @agent is mentioned in a
-#      Teams channel linked to the project
-#   3. Generic webhook → any external system via the webhook API
+# Triggered via the Azure DevOps Pipelines REST API — no
+# intermediary server needed. Just an authenticated POST:
 #
-# The webhook receiver (src/webhooks/receiver.py) parses the
-# incoming payload and calls the Azure DevOps Pipeline REST API
-# with the correct parameters.
+#   POST https://dev.azure.com/{org}/{project}/_apis/pipelines/{id}/runs?api-version=7.1
+#   Authorization: Basic {base64(:{PAT})}
+#   Body: { "templateParameters": { "workItemId": "1234", ... } }
 #
-# This pipeline is triggered via the Azure DevOps API:
-#   POST https://dev.azure.com/{org}/{project}/_apis/pipelines/{pipelineId}/runs
-#
-# Webhook payloads are mapped to pipeline variables by the
-# receiver before triggering.
+# Trigger sources that call this API:
+#   1. Azure DevOps service hook → Power Automate / Logic App
+#      parses @agent from work item comment → calls this API
+#   2. MS Teams → Power Automate flow triggers on @agent mention
+#      → extracts WI # → calls this API
+#   3. CLI: `devops-agent trigger --work-item 1234 --pipeline-id 42`
+#   4. Any script / tool with a PAT
 
 trigger: none
 pr: none
@@ -40,11 +38,12 @@ parameters:
   - name: triggerSource
     displayName: "Where the trigger came from"
     type: string
-    default: "webhook"
+    default: "api"
     values:
       - devops_mention
       - teams_mention
-      - webhook
+      - api
+      - cli
   - name: reportOnly
     displayName: "Report only"
     type: boolean
@@ -65,7 +64,6 @@ steps:
 
   - template: templates/python-setup.yml
     parameters:
-      pythonVersion: "3.12"
       installDev: false
 
   - template: templates/run-agent.yml

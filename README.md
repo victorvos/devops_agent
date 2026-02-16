@@ -45,14 +45,11 @@ graph LR
 
 ```mermaid
 flowchart TB
-    subgraph triggers["Trigger Sources"]
-        T1["Azure DevOps<br/>@agent in comment"]
-        T2["Microsoft Teams<br/>@agent in channel"]
-        T3["Manual<br/>Pipeline UI / API"]
-    end
-
-    subgraph webhook["Webhook Receiver<br/>(FastAPI on Azure Container App)"]
-        WH["POST /webhooks/devops<br/>POST /webhooks/teams<br/>POST /webhooks/trigger"]
+    subgraph triggers["Trigger Sources<br/>(all just call the Pipeline REST API)"]
+        T1["Azure DevOps service hook<br/>→ Power Automate<br/>→ Pipeline API"]
+        T2["MS Teams @agent<br/>→ Power Automate<br/>→ Pipeline API"]
+        T3["CLI<br/>devops-agent trigger"]
+        T4["Pipeline UI<br/>(manual run)"]
     end
 
     subgraph pipeline["Azure Pipeline<br/>(webhook-trigger.yml)<br/>container: python:3.12-slim"]
@@ -81,10 +78,10 @@ flowchart TB
         LLM["Azure AI Foundry<br/>GPT 5.3"]
     end
 
-    T1 --> WH
-    T2 --> WH
-    T3 -->|"direct"| pipeline
-    WH -->|"Pipeline REST API"| pipeline
+    T1 -->|"POST .../pipelines/{id}/runs"| pipeline
+    T2 -->|"POST .../pipelines/{id}/runs"| pipeline
+    T3 -->|"POST .../pipelines/{id}/runs"| pipeline
+    T4 --> pipeline
     P3 --> agent
     N1 & N3 & N5 <--> AZ
     N2 & N4 <--> LLM
@@ -248,37 +245,34 @@ uv run devops-agent investigate --work-item 1234 --report-only
 uv run devops-agent request --text "How does the auth flow work?"
 ```
 
-### Start the Webhook Receiver
+### Trigger via CLI
 
 ```bash
-# Start the FastAPI webhook server
-uv run devops-agent serve --port 8000
+# Trigger the agent pipeline from the command line (just an API call)
+uv run devops-agent trigger --work-item 1234 --pipeline-id 42
+
+# With extra context
+uv run devops-agent trigger -w 1234 -p 42 --context "Focus on auth" --type bug
 ```
 
-Endpoints:
-| Method | Path | Source |
-|--------|------|--------|
-| `POST` | `/webhooks/devops` | Azure DevOps service hook |
-| `POST` | `/webhooks/teams` | MS Teams bot / webhook |
-| `POST` | `/webhooks/trigger` | Manual / generic HTTP |
-| `GET` | `/health` | Health check |
-
 ### Trigger from Azure DevOps (`@agent`)
+
+No separate server needed. Use **Power Automate** or a **Logic App** to bridge the service hook to the Pipeline API:
 
 ```mermaid
 sequenceDiagram
     participant Dev as Developer
     participant ADO as Azure DevOps
-    participant WH as Webhook Receiver
+    participant PA as Power Automate
     participant Pipe as Azure Pipeline
     participant Agent as LangGraph Agent
     participant LLM as GPT 5.3
 
     Dev->>ADO: Comment on WI #1234:<br/>"@agent investigate the auth bug"
-    ADO->>WH: Service hook POST<br/>/webhooks/devops
-    WH->>WH: Parse @agent mention<br/>+ extract work item ID
-    WH->>Pipe: Queue pipeline run<br/>(Pipeline REST API)
-    Pipe->>Pipe: uv sync + setup
+    ADO->>PA: Service hook event<br/>(work item commented)
+    PA->>PA: Parse @agent mention<br/>+ extract WI ID + context
+    PA->>Pipe: POST /_apis/pipelines/{id}/runs<br/>(with PAT credentials)
+    Pipe->>Pipe: python:3.12-slim + uv sync
     Pipe->>Agent: Execute agent
     Agent->>ADO: Fetch WI #1234 details
     Agent->>LLM: Plan relevant files
@@ -294,27 +288,29 @@ sequenceDiagram
 **Setup steps:**
 
 1. In Azure DevOps, go to **Project Settings > Service hooks**
-2. Create a new subscription:
-   - Service: **Web Hooks**
-   - Event: **Work item commented on**
-   - Filter: (optional) area path, work item type
-   - URL: `https://your-webhook-receiver.azurecontainerapps.io/webhooks/devops`
-3. Test with a comment containing `@agent`
+2. Create a subscription: Event = **Work item commented on** → target = your Power Automate HTTP trigger
+3. In the Power Automate flow:
+   - Parse the comment text for `@agent`
+   - Extract the work item ID
+   - POST to `https://dev.azure.com/{org}/{project}/_apis/pipelines/{id}/runs?api-version=7.1` with `templateParameters`
+   - Auth: Basic with your PAT
 
 ### Trigger from MS Teams (`@agent`)
+
+Same approach — Power Automate flow triggered by a Teams message containing `@agent`:
 
 ```mermaid
 sequenceDiagram
     participant User as Team Member
     participant Teams as MS Teams
-    participant WH as Webhook Receiver
+    participant PA as Power Automate
     participant Pipe as Azure Pipeline
     participant Agent as LangGraph Agent
 
     User->>Teams: "@agent investigate #1234<br/>focus on payment retries"
-    Teams->>WH: Bot/webhook POST<br/>/webhooks/teams
-    WH->>WH: Extract WI #1234<br/>+ context text
-    WH->>Pipe: Queue pipeline run
+    Teams->>PA: Message trigger<br/>(keyword: @agent)
+    PA->>PA: Extract WI #1234 + context
+    PA->>Pipe: POST /_apis/pipelines/{id}/runs
     Pipe->>Agent: Execute agent
     Agent->>Agent: Full investigation flow
     Note over Agent: plan → fetch → reason → output
@@ -322,9 +318,10 @@ sequenceDiagram
 
 **Setup steps:**
 
-1. Register a Teams bot or use an Outgoing Webhook in your channel
-2. Point it to `https://your-webhook-receiver.azurecontainerapps.io/webhooks/teams`
-3. Mention `@agent` with a work item reference: `@agent investigate #1234`
+1. Create a Power Automate flow triggered by "When a keyword is mentioned" in Teams
+2. Set keyword to `@agent`
+3. Parse the message for a work item reference (`#1234`)
+4. Call the Pipeline REST API (same POST as above)
 
 ### Azure Pipeline (manual)
 
@@ -512,7 +509,7 @@ graph LR
 ```
 devops_agent/
 ├── src/
-│   ├── main.py                 # CLI entry point (Typer) — investigate, request, serve
+│   ├── main.py                 # CLI entry point (Typer) — investigate, request, trigger
 │   ├── config.py               # Pydantic settings from env vars
 │   ├── agent/
 │   │   ├── graph.py            # LangGraph graph definition
@@ -521,11 +518,10 @@ devops_agent/
 │   │   └── state.py            # Agent state (Pydantic model)
 │   ├── clients/
 │   │   ├── devops.py           # Azure DevOps REST API client (httpx)
-│   │   └── llm.py              # LLM client factory (AI Foundry / OpenAI / Anthropic)
-│   ├── utils/
-│   │   └── tokens.py           # Token counting & context budget management
-│   └── webhooks/
-│       └── receiver.py         # FastAPI webhook receiver (DevOps + Teams triggers)
+│   │   ├── llm.py              # LLM client factory (AI Foundry / OpenAI / Anthropic)
+│   │   └── trigger.py          # Pipeline trigger via REST API (no server needed)
+│   └── utils/
+│       └── tokens.py           # Token counting & context budget management
 ├── pipelines/
 │   ├── azure-pipeline.yml      # Manual trigger pipeline
 │   ├── webhook-trigger.yml     # @agent trigger pipeline

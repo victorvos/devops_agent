@@ -20,8 +20,6 @@ dependencies = [
     "rich>=13.0",
     "typer>=0.12",
     "python-dotenv>=1.0",
-    "fastapi>=0.115",
-    "uvicorn>=0.32",
 ]
 
 [project.optional-dependencies]

@@ -142,21 +142,40 @@ def request(
 
 
 @app.command()
-def serve(
-    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind address"),
-    port: int = typer.Option(8000, "--port", "-p", help="Bind port"),
+def trigger(
+    work_item: int = typer.Option(..., "--work-item", "-w", help="Work item ID to trigger the pipeline for"),
+    pipeline_id: int = typer.Option(..., "--pipeline-id", "-p", help="Azure DevOps pipeline ID"),
+    context: str = typer.Option("", "--context", "-c", help="Additional context"),
+    request_type: str = typer.Option("investigation", "--type", "-t", help="Request type"),
+    report_only: bool = typer.Option(False, "--report-only", "-r", help="Report only"),
 ) -> None:
-    """Start the webhook receiver server (Azure DevOps + Teams triggers)."""
-    import uvicorn
+    """Trigger the agent pipeline via Azure DevOps REST API.
 
-    console.print(Panel("[bold]DevOps Agent — Webhook Receiver[/bold]", subtitle=f"{host}:{port}"))
-    console.print("[dim]Endpoints:[/dim]")
-    console.print("  POST /webhooks/devops  — Azure DevOps service hook (@agent in comments)")
-    console.print("  POST /webhooks/teams   — MS Teams bot (@agent in channel)")
-    console.print("  POST /webhooks/trigger — Manual / generic trigger")
-    console.print("  GET  /health           — Health check\n")
+    This is the same API call that service hooks and Power Automate use.
+    No separate server needed — just credentials + one POST.
+    """
+    from src.clients.trigger import PipelineTrigger
 
-    uvicorn.run("src.webhooks.receiver:app", host=host, port=port, log_level="info")
+    async def _trigger() -> None:
+        settings = get_settings()
+        _setup_logging(settings.log_level)
+        client = PipelineTrigger(settings, pipeline_id)
+
+        console.print(f"[dim]Triggering pipeline {pipeline_id} for WI #{work_item}...[/dim]")
+        result = await client.trigger(
+            work_item_id=work_item,
+            request_type=request_type,
+            additional_context=context,
+            trigger_source="cli",
+            report_only=report_only,
+        )
+        run_id = result.get("id")
+        run_url = result.get("_links", {}).get("web", {}).get("href", "")
+        console.print(f"[bold green]Pipeline run #{run_id} queued[/bold green]")
+        if run_url:
+            console.print(f"[dim]{run_url}[/dim]")
+
+    asyncio.run(_trigger())
 
 
 def main() -> None:
