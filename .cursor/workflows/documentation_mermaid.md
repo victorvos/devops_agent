@@ -55,18 +55,18 @@ graph TB
     Success -->|No| Fail[Return Error]
 
     %% Styling
-    style Start fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
-    style Auth fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style Login fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
-    style Process fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style Done fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#white
-    style Fail fill:#f44336,stroke:#c62828,stroke-width:2px,color:#white
+    style Start fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style Auth fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style Login fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style Process fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style Done fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#000000
+    style Fail fill:#f44336,stroke:#c62828,stroke-width:2px,color:#000000
 ```
 
 ### Styling Syntax
 Always include the style block at the end of your Mermaid graph:
 ```mermaid
-    style NodeName fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style NodeName fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000  %% always use #000000 for text
 ```
 
 ### Diagram Type Guidelines

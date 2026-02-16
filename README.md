@@ -35,13 +35,13 @@ graph LR
     end
 
     %% Styling
-    style A fill:#f44336,stroke:#c62828,stroke-width:2px,color:#white
-    style B fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style C fill:#f44336,stroke:#c62828,stroke-width:2px,color:#white
-    style D fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
-    style E fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style F fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style G fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#white
+    style A fill:#f44336,stroke:#c62828,stroke-width:2px,color:#000000
+    style B fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style C fill:#f44336,stroke:#c62828,stroke-width:2px,color:#000000
+    style D fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style E fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style F fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style G fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#000000
 ```
 
 | Metric | Full Repo Approach | This Agent |
@@ -102,72 +102,52 @@ flowchart TB
     N2 & N4 <--> LLM
 
     %% Styling
-    style T1 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
-    style T2 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
-    style T3 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
-    style T4 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
-    style P1 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style P2 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style P3 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style N1 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
-    style N2 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
-    style N3 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
-    style N4 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
-    style N5 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
-    style AZ fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
-    style LLM fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style T1 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style T2 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style T3 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style T4 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style P1 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style P2 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style P3 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style N1 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style N2 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style N3 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style N4 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style N5 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style AZ fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style LLM fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
 ```
 
 ### LangGraph agent detail
 
 ```mermaid
-stateDiagram-v2
-    [*] --> receive_request
+flowchart TB
+    START(( )) --> N1
 
-    receive_request: receive_request
-    note right of receive_request
-        Fetch work item fields,
-        comments, tags via REST API.
-        Get repo file tree (metadata only).
-    end note
+    N1["receive_request<br/>Fetch work item fields, comments,<br/>tags via REST API. Get repo tree."]
+    N1 --> N2
 
-    receive_request --> plan_files
+    N2["plan_files<br/>LLM analyzes work item + repo<br/>structure to select 5-20 file paths."]
+    N2 --> N3
 
-    plan_files: plan_files
-    note right of plan_files
-        LLM analyzes work item +
-        repo structure to select
-        5-20 relevant file paths.
-    end note
+    N3["fetch_files<br/>Download file contents via<br/>Azure DevOps Git Items API."]
+    N3 --> N4
 
-    plan_files --> fetch_files
+    N4["reason<br/>Analyze code against work item.<br/>Produce report + suggested changes."]
+    N4 -->|"needs_more_context<br/>(up to 3 iterations)"| N2
+    N4 -->|"done"| N5
 
-    fetch_files: fetch_files
-    note right of fetch_files
-        Download file contents via
-        Azure DevOps Git Items API.
-        No clone needed.
-    end note
+    N5["create_output<br/>Create branch, push files,<br/>open PR — or return report only."]
+    N5 --> END(( ))
 
-    fetch_files --> reason
-
-    reason: reason
-    note right of reason
-        Analyze code against work item.
-        Produce report + suggested changes.
-        May request more context.
-    end note
-
-    reason --> plan_files: needs_more_context\n(up to 3 iterations)
-    reason --> create_output: done
-
-    create_output: create_output
-    note right of create_output
-        Create branch, push files,
-        open PR — or return report only.
-    end note
-
-    create_output --> [*]
+    %% Styling
+    style START fill:#000000,stroke:#000000,color:#000000
+    style END fill:#000000,stroke:#000000,color:#000000
+    style N1 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style N2 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style N3 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style N4 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style N5 fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#000000
 ```
 
 ### Pipeline template reuse
@@ -192,11 +172,11 @@ graph TB
     WEB --> TRA
 
     %% Styling
-    style TPY fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
-    style TRA fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
-    style CI fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style MAN fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style WEB fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
+    style TPY fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style TRA fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style CI fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style MAN fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style WEB fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
 ```
 
 ---
@@ -451,11 +431,11 @@ flowchart LR
     UV_LOCK["uv.lock"] -->|"cache key"| C
 
     %% Styling
-    style C fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style NOOP fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#white
-    style SYNC fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
-    style SAVE fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
-    style UV_LOCK fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style C fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style NOOP fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#000000
+    style SYNC fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style SAVE fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style UV_LOCK fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
 ```
 
 ### `run-agent.yml`
@@ -491,12 +471,12 @@ graph LR
     end
 
     %% Styling
-    style A1 fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#white
-    style A2 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style A3 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
-    style B1 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
-    style B2 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
-    style B3 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
+    style A1 fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#000000
+    style A2 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style A3 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style B1 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style B2 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style B3 fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
 ```
 
 GPT 5.3 via Azure AI Foundry supports ~400k token context windows, but this agent deliberately stays under 120k to maximize cost efficiency and reasoning quality.
@@ -542,12 +522,12 @@ graph LR
     E --> F
 
     %% Styling
-    style A fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#black
-    style B fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#black
-    style C fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
-    style D fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
-    style E fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#black
-    style F fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#white
+    style A fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style B fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style C fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style D fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style E fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style F fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#000000
 ```
 
 ---
