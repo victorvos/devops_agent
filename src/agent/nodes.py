@@ -251,7 +251,8 @@ async def create_output(
         return updates
 
     # For feature skeletons, bug fixes, or PR-with-changes: create a branch
-    branch_name = f"agent/{state.recommended_action.value}/{work_id}"
+    branch_prefix = devops._settings.branch_prefix
+    branch_name = f"{branch_prefix}/{state.recommended_action.value}/{work_id}"
 
     try:
         await devops.create_branch(branch_name)

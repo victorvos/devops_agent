@@ -39,12 +39,16 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
 
     if settings.service_bus_connection_str:
-        from azure.servicebus.aio import ServiceBusClient
+        try:
+            from azure.servicebus.aio import ServiceBusClient
 
-        _sb_client = ServiceBusClient.from_connection_string(
-            settings.service_bus_connection_str,
-        )
-        logger.info("Service Bus configured (queue=%s) — queued mode", settings.service_bus_queue_name)
+            _sb_client = ServiceBusClient.from_connection_string(
+                settings.service_bus_connection_str,
+            )
+            logger.info("Service Bus configured (queue=%s) — queued mode", settings.service_bus_queue_name)
+        except ImportError:
+            logger.warning("SERVICE_BUS_CONNECTION_STR set but azure-servicebus not installed — running in direct mode")
+            _sb_client = None
     else:
         logger.info("No Service Bus configured — running in direct mode")
 

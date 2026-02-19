@@ -6,12 +6,23 @@ All Service Bus interactions are mocked. Tests follow Arrange-Act-Assert.
 from __future__ import annotations
 
 import json
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.api import app, _job_store
+
+
+def _ensure_azure_servicebus_mock():
+    """Ensure azure.servicebus can be imported when the package is not installed (e.g. in tests)."""
+    if "azure" not in sys.modules:
+        sys.modules["azure"] = MagicMock()
+    if "azure.servicebus" not in sys.modules:
+        mod = MagicMock()
+        mod.ServiceBusMessage = MagicMock()
+        sys.modules["azure.servicebus"] = mod
 
 
 @pytest.fixture(autouse=True)
@@ -49,8 +60,16 @@ class TestInvestigateEndpoint:
         mock_sb = MagicMock()
         mock_sb.get_queue_sender.return_value = mock_sender
 
+        mock_settings = MagicMock()
+        mock_settings.service_bus_queue_name = "agent-requests"
+
+        _ensure_azure_servicebus_mock()
+
         # Act
-        with patch("src.api._sb_client", mock_sb):
+        with (
+            patch("src.api._sb_client", mock_sb),
+            patch("src.api.get_settings", return_value=mock_settings),
+        ):
             response = client.post(
                 "/api/investigate",
                 json={
@@ -62,7 +81,7 @@ class TestInvestigateEndpoint:
             )
 
         # Assert
-        assert response.status_code == 200
+        assert response.status_code == 200, f"Got {response.status_code}: {response.text}"
         data = response.json()
         assert data["status"] == "queued"
         assert "job_id" in data

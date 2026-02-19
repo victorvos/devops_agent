@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -91,7 +91,19 @@ class Settings(BaseSettings):
     max_files_per_request: int = Field(default=20, ge=1, le=50)
     max_tokens_context: int = Field(default=120_000, ge=1_000)
     default_branch: str = "main"
+    branch_prefix: str = Field(
+        default="feature_ai",
+        description="Prefix for agent-created branches (trailing slash optional). E.g. 'feature_ai' → feature_ai/feature_skeleton/123",
+    )
     log_level: str = "INFO"
+
+    @field_validator("branch_prefix", mode="before")
+    @classmethod
+    def _normalize_branch_prefix(cls, v: str) -> str:
+        """Strip trailing slash so branch names are prefix/action/id, never prefix//action/id."""
+        if isinstance(v, str) and v.endswith("/"):
+            return v.rstrip("/")
+        return v
 
     # ── Service Bus (Container App deployment) ───────────────────
     service_bus_connection_str: str = Field(

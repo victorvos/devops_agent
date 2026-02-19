@@ -148,7 +148,7 @@ The agent expects a JSON body like:
 | `work_item_id` | integer | Yes      | Azure DevOps work item ID. |
 | `request_type` | string  | No       | `investigation` (default), `feature_request`, or `bug`. |
 | `context`      | string  | No       | Extra context (e.g. the comment text). |
-| `report_only`  | boolean | No       | `true` (default) = only post a comment; `false` = allow branch/PR creation. |
+| `report_only`  | boolean | No       | `true` (default) = only post a comment; `false` = allow the agent to create a branch and pull request in the **configured repo** (same repo the agent searches). Branch names use the app’s `BRANCH_PREFIX` (e.g. `feature_ai/feature_skeleton/12345`). |
 
 Example:
 

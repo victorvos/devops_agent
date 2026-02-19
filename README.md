@@ -153,7 +153,7 @@ flowchart TB
 - **[ProGet](https://inedo.com/proget)** PyPI feed (your org's private package index)
 - **Azure DevOps** organization with permissions: Code (Read & Write), Work Items (Read & Write), Pull Requests (Read & Write)
 - **Azure AI Foundry** project with GPT 5.3 deployed (or another supported model)
-- **Azure subscription** with Container Apps (Service Bus, Key Vault, VNet are optional)
+- **Azure subscription** with Container Apps (Service Bus and VNet are optional; Key Vault is always created for the workload)
 
 ### Local installation
 
@@ -191,7 +191,7 @@ Key settings in `.env`:
 | `AZURE_AI_FOUNDRY_API_KEY` | Foundry API key | `xxxx...` |
 | `AZURE_AI_FOUNDRY_MODEL` | Model deployment | `gpt-5.3` |
 | `SERVICE_BUS_CONNECTION_STR` | *(optional)* Service Bus connection | `Endpoint=sb://...` |
-| `KEY_VAULT_URL` | *(optional)* Key Vault URL | `https://devops-agent-kv.vault.azure.net` |
+| `KEY_VAULT_URL` | Set by Bicep; app uses it to resolve secrets | Workload vault URL |
 
 ### Authentication
 
@@ -317,7 +317,7 @@ sequenceDiagram
 
 ### Quick start (3 resources)
 
-The Bicep template deploys the **minimum** needed to run: Managed Identity + Container App Environment + Container App. Service Bus and Key Vault are optional add-ons.
+The Bicep template deploys **Managed Identity**, a **project Key Vault** (all credentials stored here), **Container App Environment**, and **Container App**. You deploy into a **workload** resource group (e.g. `a-azwl`) and pass **projectName** (e.g. `domeinteam_devops_agent`) so resource names are per project. The app gets secrets via Key Vault secret references. Service Bus is optional; see [infra/DEPLOY.md](infra/DEPLOY.md) for adding the required Key Vault secret **`AzureAIFoundryApiKey`** after deploy.
 
 ```bash
 RG="rg-devops-agent"
@@ -325,22 +325,22 @@ RG="rg-devops-agent"
 # 1. Build and push
 az acr build --registry devopsagentacr --image devops-agent:latest .
 
-# 2. Deploy (just workload name + DevOps config)
+# 2. Deploy (project name + DevOps config; deploy into workload RG)
 az deployment group create -g $RG -f infra/main.bicep \
-  -p workloadName='devops-agent' \
+  -p projectName='domeinteam_devops_agent' \
      devopsOrgUrl='https://dev.azure.com/contoso' \
      devopsProject='MyProject' \
      devopsRepository='backend-api' \
      acrName='devopsagentacr'
 ```
 
-All resource names derive from the workload name:
+All resource names derive from **projectName** (underscores become hyphens):
 
-| Resource | Name |
+| Resource | Name (example for projectName=domeinteam_devops_agent) |
 |----------|------|
-| Managed Identity | `devops-agent-id` |
-| Container App Env | `devops-agent-env` |
-| Container App | `devops-agent-app` |
+| Managed Identity | `domeinteam-devops-agent-id` |
+| Container App Env | `domeinteam-devops-agent-env` |
+| Container App | `domeinteam-devops-agent-app` |
 
 Without Service Bus the app processes requests directly — no queue overhead. Add `deployServiceBus=true` later when you need retries and dead-letter handling.
 
@@ -364,6 +364,15 @@ The agent **never removes or overwrites** existing work item content. All findin
 | Remove fields / tags | **Blocked** | Raises `ValueError` at runtime |
 
 Default mode is **report-only** (`report_only: true`) — the agent posts its analysis as a comment and stops. Branch/PR creation must be explicitly opted into.
+
+### Branch and PR creation (when `report_only: false`)
+
+- **Repository:** All Git operations (file search, branch creation, push, pull request) use the **single repo** configured for the app (`AZURE_DEVOPS_PROJECT` + `AZURE_DEVOPS_REPOSITORY`). The agent does not switch repos per request.
+- **When it happens:** If the caller sends `report_only: false` and the agent’s reasoning recommends a feature skeleton, bug fix, or PR with changes (instead of only an investigation report), it will:
+  1. Create a branch from the default branch (e.g. `main`),
+  2. Push the report and any suggested file changes,
+  3. Open a pull request into the default branch and link the work item.
+- **Branch naming:** Branches are named `{BRANCH_PREFIX}/{action}/{work_item_id}` (default `BRANCH_PREFIX=feature_ai` → `feature_ai/feature_skeleton/12345`). Override in config or Bicep if you prefer another prefix (e.g. `agent`).
 
 ---
 
@@ -445,7 +454,7 @@ devops_agent/
 │   └── utils/
 │       └── tokens.py           # Token counting & context budget management
 ├── infra/
-│   ├── main.bicep              # All infrastructure (workload-name-based)
+│   ├── main.bicep              # All infrastructure (projectName-based)
 │   ├── parameters.bicepparam   # Environment-specific values
 │   └── DEPLOY.md               # Step-by-step deployment + CLI troubleshooting
 ├── tests/

@@ -14,8 +14,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from azure.servicebus.aio import ServiceBusClient
-
 from src.agent.graph import build_graph
 from src.agent.state import AgentState
 from src.clients.devops import AzureDevOpsClient
@@ -106,6 +104,8 @@ async def _process_message(payload: dict[str, Any]) -> None:
 
 async def run_worker() -> None:
     """Long-running loop that consumes messages from Service Bus."""
+    from azure.servicebus.aio import ServiceBusClient
+
     settings = get_settings()
 
     if not settings.service_bus_connection_str:

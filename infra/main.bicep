@@ -1,13 +1,13 @@
 // ────────────────────────────────────────────────────────────────
 // Azure DevOps Agent — lightweight Container App deployment
 //
-// Minimum:  Managed Identity + Container App Environment + Container App
-// Optional: Service Bus (set deployServiceBus = true)
-//           Key Vault role assignment (set keyVaultName)
+// Within a workload (e.g. resource group a-azwl) you may have multiple
+// projects. Resource names are derived from projectName (e.g. domeinteam_devops_agent).
+// All credentials are stored in the project's Key Vault.
 //
 // Usage:
-//   az deployment group create -g <rg> -f infra/main.bicep \
-//     -p workloadName='devops-agent' \
+//   az deployment group create -g <workload-rg> -f infra/main.bicep \
+//     -p projectName='domeinteam_devops_agent' \
 //        devopsOrgUrl='https://dev.azure.com/contoso' \
 //        devopsProject='MyProject' \
 //        devopsRepository='backend-api' \
@@ -18,10 +18,10 @@ targetScope = 'resourceGroup'
 
 // ── Required ────────────────────────────────────────────────────
 
-@description('Workload name — all resource names are derived from this')
+@description('Project name — all resource names are derived from this (e.g. domeinteam_devops_agent). Use one per project within the workload.')
 @minLength(3)
-@maxLength(24)
-param workloadName string
+@maxLength(64)
+param projectName string
 
 @description('Azure DevOps organization URL')
 param devopsOrgUrl string
@@ -46,20 +46,23 @@ param imageTag string = 'latest'
 @description('Subnet ID for VNet integration (leave empty to skip)')
 param subnetId string = ''
 
-@description('Azure AI Foundry endpoint URL')
+@description('Azure AI Foundry endpoint URL (non-secret; can stay in env)')
 param aiFoundryEndpoint string = ''
+
+@description('Prefix for agent-created branches (e.g. feature_ai)')
+param branchPrefix string = 'feature_ai'
 
 @description('Deploy Service Bus namespace + queue (set true for queue-based processing)')
 param deployServiceBus bool = false
 
-@description('Existing Key Vault name for role assignment (leave empty to skip)')
-param keyVaultName string = ''
+// ── Naming (sanitized for Azure: underscores → hyphens; Key Vault 3–24 chars, no underscores) ──
 
-// ── Naming ──────────────────────────────────────────────────────
-
-var identityName = '${workloadName}-id'
-var envName = '${workloadName}-env'
-var appName = '${workloadName}-app'
+var sanitized = replace(projectName, '_', '-')
+var identityName = '${sanitized}-id'
+var envName = '${sanitized}-env'
+var appName = '${sanitized}-app'
+var sbNamespaceName = '${sanitized}-sb'
+var keyVaultName = '${take(replace(projectName, '_', ''), 11)}kv${uniqueString(resourceGroup().id)}'
 
 // ═══════════════════════════════════════════════════════════════
 // CORE — always deployed
@@ -68,6 +71,30 @@ var appName = '${workloadName}-app'
 resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: identityName
   location: location
+}
+
+// Workload Key Vault — all credentials for this agent live here
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+  name: keyVaultName
+  location: location
+  properties: {
+    sku: { family: 'A', name: 'standard' }
+    tenantId: subscription().tenantId
+    enableRbacAuthorization: true
+    softDeleteRetentionInDays: 7
+  }
+}
+
+var kvSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
+
+resource kvRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, managedIdentity.id, kvSecretsUserRoleId)
+  scope: keyVault
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', kvSecretsUserRoleId)
+    principalId: managedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
 }
 
 resource containerAppEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
@@ -82,67 +109,12 @@ resource containerAppEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
-resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
-  name: appName
-  location: location
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${managedIdentity.id}': {}
-    }
-  }
-  properties: {
-    managedEnvironmentId: containerAppEnv.id
-    configuration: {
-      ingress: {
-        external: true
-        targetPort: 8000
-        transport: 'http'
-      }
-      registries: [
-        {
-          server: '${acrName}.azurecr.io'
-          identity: managedIdentity.id
-        }
-      ]
-    }
-    template: {
-      containers: [
-        {
-          name: 'devops-agent'
-          image: '${acrName}.azurecr.io/devops-agent:${imageTag}'
-          resources: {
-            cpu: json('0.5')
-            memory: '1Gi'
-          }
-          env: [
-            { name: 'AZURE_DEVOPS_ORG_URL', value: devopsOrgUrl }
-            { name: 'AZURE_DEVOPS_PROJECT', value: devopsProject }
-            { name: 'AZURE_DEVOPS_REPOSITORY', value: devopsRepository }
-            { name: 'DEVOPS_AUTH_MODE', value: 'managed_identity' }
-            { name: 'MANAGED_IDENTITY_CLIENT_ID', value: managedIdentity.properties.clientId }
-            { name: 'AZURE_AI_FOUNDRY_ENDPOINT', value: aiFoundryEndpoint }
-            { name: 'SERVICE_BUS_CONNECTION_STR', value: deployServiceBus ? listKeys(serviceBusNamespace.id, serviceBusNamespace.apiVersion).primaryConnectionString : '' }
-            { name: 'SERVICE_BUS_QUEUE_NAME', value: 'agent-requests' }
-            { name: 'KEY_VAULT_URL', value: keyVaultName != '' ? keyVault.properties.vaultUri : '' }
-            { name: 'LOG_LEVEL', value: 'INFO' }
-          ]
-        }
-      ]
-      scale: {
-        minReplicas: 0
-        maxReplicas: 3
-      }
-    }
-  }
-}
-
 // ═══════════════════════════════════════════════════════════════
 // OPTIONAL — Service Bus (deployServiceBus = true)
 // ═══════════════════════════════════════════════════════════════
 
 resource serviceBusNamespace 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' = if (deployServiceBus) {
-  name: '${workloadName}-sb'
+  name: sbNamespaceName
   location: location
   sku: { name: 'Standard'; tier: 'Standard' }
 }
@@ -170,23 +142,92 @@ resource sbRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// OPTIONAL — Key Vault role assignment (keyVaultName != '')
-// ═══════════════════════════════════════════════════════════════
+// Secret names in Key Vault — app expects these when using KV for credentials
+var secretNameServiceBus = 'ServiceBusConnectionString'
+var secretNameAIFoundryApiKey = 'AzureAIFoundryApiKey'
 
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = if (keyVaultName != '') {
-  name: keyVaultName
+// Store Service Bus connection string in Key Vault when Service Bus is deployed
+resource serviceBusConnectionSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (deployServiceBus) {
+  parent: keyVault
+  name: secretNameServiceBus
+  properties: {
+    value: listKeys(serviceBusNamespace.id, serviceBusNamespace.apiVersion).primaryConnectionString
+  }
 }
 
-var kvSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
-
-resource kvRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (keyVaultName != '') {
-  name: guid(keyVault.id, managedIdentity.id, kvSecretsUserRoleId)
-  scope: keyVault
+resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
+  name: appName
+  location: location
+  dependsOn: concat([keyVault, containerAppEnv], deployServiceBus ? [serviceBusConnectionSecret] : [])
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${managedIdentity.id}': {}
+    }
+  }
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', kvSecretsUserRoleId)
-    principalId: managedIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
+    managedEnvironmentId: containerAppEnv.id
+    configuration: {
+      ingress: {
+        external: true
+        targetPort: 8000
+        transport: 'http'
+      }
+      registries: [
+        {
+          server: '${acrName}.azurecr.io'
+          identity: managedIdentity.id
+        }
+      ]
+      secrets: concat(
+        deployServiceBus ? [
+          {
+            name: 'sb-connection'
+            keyVaultUrl: '${keyVault.properties.vaultUri}secrets/${secretNameServiceBus}'
+            identity: managedIdentity.id
+          }
+        ] : [],
+        [
+          {
+            name: 'ai-foundry-api-key'
+            keyVaultUrl: '${keyVault.properties.vaultUri}secrets/${secretNameAIFoundryApiKey}'
+            identity: managedIdentity.id
+          }
+        ]
+      )
+    }
+    template: {
+      containers: [
+        {
+          name: 'devops-agent'
+          image: '${acrName}.azurecr.io/devops-agent:${imageTag}'
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: concat(
+            [
+              { name: 'AZURE_DEVOPS_ORG_URL', value: devopsOrgUrl }
+              { name: 'AZURE_DEVOPS_PROJECT', value: devopsProject }
+              { name: 'AZURE_DEVOPS_REPOSITORY', value: devopsRepository }
+              { name: 'DEVOPS_AUTH_MODE', value: 'managed_identity' }
+              { name: 'MANAGED_IDENTITY_CLIENT_ID', value: managedIdentity.properties.clientId }
+              { name: 'AZURE_AI_FOUNDRY_ENDPOINT', value: aiFoundryEndpoint }
+              { name: 'SERVICE_BUS_QUEUE_NAME', value: 'agent-requests' }
+              { name: 'KEY_VAULT_URL', value: keyVault.properties.vaultUri }
+              { name: 'BRANCH_PREFIX', value: branchPrefix }
+              { name: 'LOG_LEVEL', value: 'INFO' }
+            ],
+            deployServiceBus ? [{ name: 'SERVICE_BUS_CONNECTION_STR', secretRef: 'sb-connection' }] : [],
+            [{ name: 'AZURE_AI_FOUNDRY_API_KEY', secretRef: 'ai-foundry-api-key' }]
+          )
+        }
+      ]
+      scale: {
+        minReplicas: 0
+        maxReplicas: 3
+      }
+    }
   }
 }
 
@@ -196,3 +237,5 @@ output containerAppFqdn string = containerApp.properties.configuration.ingress.f
 output containerAppName string = containerApp.name
 output managedIdentityClientId string = managedIdentity.properties.clientId
 output managedIdentityPrincipalId string = managedIdentity.properties.principalId
+output keyVaultName string = keyVault.name
+output keyVaultUri string = keyVault.properties.vaultUri
