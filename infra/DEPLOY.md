@@ -83,16 +83,26 @@ az acr build --registry $ACR_NAME --image devops-agent:latest .
 
 ## Step 3: Deploy with Bicep
 
-Deploys Managed Identity, Key Vault, Container App Environment, and Container App (plus optional Service Bus). Replace the placeholder values with your workload and org details.
+Deploys Managed Identity, Key Vault, Container App Environment, and Container App (plus optional Service Bus).
+
+**What to use where:**
+
+| Parameter | Meaning | Example |
+|-----------|---------|---------|
+| `devopsOrgUrl` | Azure DevOps **organization** URL | `https://dev.azure.com/your-org` |
+| `devopsProject` | Azure DevOps **project** name (the project that contains the target repo) | `devops_agent` or `MyTeam` |
+| `devopsRepository` | **Target** repo the agent operates on: the Git repo the agent will search (metadata/file fetch) and create branches/PRs in. Use your **team code repo** here so the agent uses it as context for new features and investigations. Not the repo where the devops_agent source code lives. | e.g. `team-backend` or `product-api` — your team’s main codebase |
+| `aiFoundryEndpoint` | Azure AI Foundry **project** endpoint (where your model is deployed; get it from AI Studio) | `https://your-ai-project.services.ai.azure.com` |
 
 **Minimal (no VNet, no Service Bus):**
 
 ```bash
+# Use your team code repo for devopsProject + devopsRepository (agent uses it for context/features)
 az deployment group create -g $RG -f infra/main.bicep \
   -p projectName=$PROJECT_NAME \
      devopsOrgUrl='https://dev.azure.com/your-org' \
-     devopsProject='YourProject' \
-     devopsRepository='your-repo' \
+     devopsProject='YourTeamProject' \
+     devopsRepository='your-team-repo' \
      acrName=$ACR_NAME
 ```
 
@@ -102,10 +112,10 @@ az deployment group create -g $RG -f infra/main.bicep \
 az deployment group create -g $RG -f infra/main.bicep \
   -p projectName=$PROJECT_NAME \
      devopsOrgUrl='https://dev.azure.com/your-org' \
-     devopsProject='YourProject' \
-     devopsRepository='your-repo' \
+     devopsProject='YourTeamProject' \
+     devopsRepository='your-team-repo' \
      acrName=$ACR_NAME \
-     aiFoundryEndpoint='https://your-project.services.ai.azure.com'
+     aiFoundryEndpoint='https://your-ai-project.services.ai.azure.com'
 ```
 
 **With VNet + Service Bus:**
@@ -114,10 +124,10 @@ az deployment group create -g $RG -f infra/main.bicep \
 az deployment group create -g $RG -f infra/main.bicep \
   -p projectName=$PROJECT_NAME \
      devopsOrgUrl='https://dev.azure.com/your-org' \
-     devopsProject='YourProject' \
-     devopsRepository='your-repo' \
+     devopsProject='YourTeamProject' \
+     devopsRepository='your-team-repo' \
      acrName=$ACR_NAME \
-     aiFoundryEndpoint='https://your-project.services.ai.azure.com' \
+     aiFoundryEndpoint='https://your-ai-project.services.ai.azure.com' \
      subnetId='/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<subnet>' \
      deployServiceBus=true
 ```
