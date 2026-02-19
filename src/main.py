@@ -1,7 +1,7 @@
 """CLI entry point for the Azure DevOps Agent.
 
 Usage:
-    # Investigate a work item
+    # Investigate a work item (report-only by default)
     devops-agent investigate --work-item 1234
 
     # Investigate with extra context
@@ -10,8 +10,8 @@ Usage:
     # Free-form request (no work item)
     devops-agent request --text "How does the payment module handle retries?"
 
-    # Report only (no branch/PR creation)
-    devops-agent investigate --work-item 1234 --report-only
+    # Start the API server (Container App deployment)
+    devops-agent serve
 """
 
 from __future__ import annotations
@@ -59,22 +59,18 @@ async def _run_agent(
 
     console.print(Panel("[bold]Azure DevOps Agent[/bold]", subtitle="Targeted Retrieval"))
 
-    # Initialize clients
     devops = AzureDevOpsClient(settings)
     llm = get_chat_model(settings)
 
     try:
-        # Build the graph
         graph = build_graph(settings, devops, llm)
 
-        # Prepare initial state
         initial_state = AgentState(
             work_item_id=work_item_id,
             request_text=request_text,
             request_type=request_type,
         )
 
-        # If report-only, override max action
         if report_only:
             initial_state.max_iterations = 1
 
@@ -82,11 +78,9 @@ async def _run_agent(
         console.print(f"[dim]Request type:[/dim] {request_type}")
         console.print(f"[dim]Context:[/dim] {request_text[:200] or '(from work item)'}\n")
 
-        # Execute the graph
         with console.status("[bold green]Agent working..."):
             result = await graph.ainvoke(initial_state)
 
-        # Display results
         console.print()
         if isinstance(result, dict):
             state = AgentState(**result)
@@ -105,7 +99,6 @@ async def _run_agent(
         if state.output_pr_url:
             console.print(f"[bold]PR:[/bold] {state.output_pr_url}")
 
-        # Show plan summary
         if state.planned_files:
             console.print(f"\n[dim]Files reviewed: {len(state.planned_files)}[/dim]")
             for pf in state.planned_files:
@@ -142,44 +135,18 @@ def request(
 
 
 @app.command()
-def trigger(
-    work_item: int = typer.Option(..., "--work-item", "-w", help="Work item ID to trigger the pipeline for"),
-    pipeline_id: int = typer.Option(..., "--pipeline-id", "-p", help="Azure DevOps pipeline ID"),
-    context: str = typer.Option("", "--context", "-c", help="Additional context"),
-    request_type: str = typer.Option("investigation", "--type", "-t", help="Request type"),
-    report_only: bool = typer.Option(True, "--report-only", "-r", help="Report only (default). Use --no-report-only to create branch/PR"),
+def serve(
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind address"),
+    port: int = typer.Option(8000, "--port", "-p", help="Listen port"),
 ) -> None:
-    """Trigger the agent pipeline via Azure DevOps REST API.
+    """Start the FastAPI server (for Container App deployment)."""
+    import uvicorn
 
-    This is the same API call that service hooks and Power Automate use.
-    No separate server needed — just credentials + one POST.
-    """
-    from src.clients.trigger import PipelineTrigger
-
-    async def _trigger() -> None:
-        settings = get_settings()
-        _setup_logging(settings.log_level)
-        client = PipelineTrigger(settings, pipeline_id)
-
-        console.print(f"[dim]Triggering pipeline {pipeline_id} for WI #{work_item}...[/dim]")
-        result = await client.trigger(
-            work_item_id=work_item,
-            request_type=request_type,
-            additional_context=context,
-            trigger_source="cli",
-            report_only=report_only,
-        )
-        run_id = result.get("id")
-        run_url = result.get("_links", {}).get("web", {}).get("href", "")
-        console.print(f"[bold green]Pipeline run #{run_id} queued[/bold green]")
-        if run_url:
-            console.print(f"[dim]{run_url}[/dim]")
-
-    asyncio.run(_trigger())
+    uvicorn.run("src.api:app", host=host, port=port)
 
 
 def main() -> None:
-    """Entry point for direct `python -m src.main` execution."""
+    """Entry point for direct ``python -m src.main`` execution."""
     app()
 
 

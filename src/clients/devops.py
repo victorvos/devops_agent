@@ -9,13 +9,12 @@ Provides targeted, cost-efficient access to:
 Uses httpx for async HTTP instead of cloning the full repo.
 
 Auth modes:
-  - system_token: Bearer auth with $(System.AccessToken) — preferred in pipelines.
-  - pat: Basic auth with base64-encoded PAT — for local dev / external triggers.
+  - managed_identity: Bearer auth via azure-identity — preferred in Container Apps.
+  - system_token: Bearer auth with $(System.AccessToken) — for Azure Pipelines / CI.
 """
 
 from __future__ import annotations
 
-import base64
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,8 +25,9 @@ from src.config import DevOpsAuthMode, Settings
 
 logger = logging.getLogger(__name__)
 
-# Azure DevOps REST API version used across all calls
 API_VERSION = "7.1"
+
+DEVOPS_API_SCOPE = "499b84ac-1321-427f-aa17-267ca6975798/.default"
 
 
 @dataclass
@@ -51,19 +51,21 @@ class RepoTree:
 def _build_auth_header(settings: Settings) -> str:
     """Build the Authorization header value based on auth mode.
 
-    Args:
-        settings: Application settings with auth config.
-
-    Returns:
-        Authorization header value (e.g. "Bearer ..." or "Basic ...").
+    For managed_identity, acquires a token synchronously at startup.
+    The token is cached by azure-identity and refreshed automatically.
     """
-    if settings.devops_auth_mode == DevOpsAuthMode.SYSTEM_TOKEN:
-        logger.info("Using System.AccessToken (Bearer) for DevOps API auth")
-        return f"Bearer {settings.system_access_token}"
+    if settings.devops_auth_mode == DevOpsAuthMode.MANAGED_IDENTITY:
+        from azure.identity import ManagedIdentityCredential
 
-    logger.info("Using PAT (Basic) for DevOps API auth")
-    token = base64.b64encode(f":{settings.azure_devops_pat}".encode()).decode()
-    return f"Basic {token}"
+        logger.info("Using Managed Identity for DevOps API auth")
+        credential = ManagedIdentityCredential(
+            client_id=settings.managed_identity_client_id or None
+        )
+        token = credential.get_token(DEVOPS_API_SCOPE)
+        return f"Bearer {token.token}"
+
+    logger.info("Using System.AccessToken (Bearer) for DevOps API auth")
+    return f"Bearer {settings.system_access_token}"
 
 
 class AzureDevOpsClient:
@@ -72,10 +74,9 @@ class AzureDevOpsClient:
     Designed for *targeted retrieval* — fetches only the files the agent
     needs rather than cloning the entire repository.
 
-    Supports two auth modes:
-      - system_token: Uses $(System.AccessToken) from the pipeline (Bearer).
-        No PAT secret needed — the pipeline's build identity is used.
-      - pat: Uses a Personal Access Token (Basic). For local dev.
+    Auth modes:
+      - managed_identity: User-assigned Managed Identity (Container App).
+      - system_token: $(System.AccessToken) from the pipeline (Bearer).
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -108,10 +109,6 @@ class AzureDevOpsClient:
 
         Uses the Items endpoint with recursion to get structure without
         downloading file contents — very cheap.
-
-        Args:
-            scope_path: Root path to enumerate (e.g. "/src").
-            depth: 1 = immediate children, 2 = two levels deep.
         """
         recursion = "OneLevel" if depth <= 1 else "Full"
         url = self._git_url("/items")
@@ -141,12 +138,7 @@ class AzureDevOpsClient:
     # ── File contents ────────────────────────────────────────────
 
     async def get_file_content(self, path: str, branch: str | None = None) -> FileItem:
-        """Download a single file's content via the Items endpoint.
-
-        Args:
-            path: Repo-relative path, e.g. "/src/main.py".
-            branch: Override branch (defaults to configured default_branch).
-        """
+        """Download a single file's content via the Items endpoint."""
         url = self._git_url("/items")
         params: dict[str, Any] = {
             "path": path,
@@ -221,10 +213,6 @@ class AzureDevOpsClient:
         This is the preferred way to post agent results — comments are
         immutable entries in the work item history and cannot overwrite
         or delete existing information.
-
-        Args:
-            work_item_id: The work item to comment on.
-            text: Comment body (supports HTML).
         """
         url = self._wit_url(f"/workitems/{work_item_id}/comments")
         params: dict[str, Any] = {"api-version": f"{API_VERSION}-preview"}
@@ -241,16 +229,7 @@ class AzureDevOpsClient:
         """Update a work item using JSON Patch operations.
 
         SAFETY: Only 'add' operations are allowed. The 'replace' and
-        'remove' ops are rejected to prevent accidental data loss from
-        AI hallucinations or bugs. Use add_work_item_comment() to post
-        agent results instead.
-
-        Args:
-            work_item_id: Work item to update.
-            operations: JSON Patch operations (only 'add' allowed).
-
-        Raises:
-            ValueError: If any operation uses 'replace' or 'remove'.
+        'remove' ops are rejected to prevent accidental data loss.
         """
         for op in operations:
             op_type = op.get("op", "").lower()
@@ -289,11 +268,7 @@ class AzureDevOpsClient:
         return refs[0]["objectId"]
 
     async def create_branch(self, branch_name: str) -> dict[str, Any]:
-        """Create a new branch from the tip of the default branch.
-
-        Args:
-            branch_name: Short name, e.g. "feature/agent-investigation-123".
-        """
+        """Create a new branch from the tip of the default branch."""
         source_commit = await self.get_default_branch_ref()
         url = self._git_url("/refs")
         params = {"api-version": API_VERSION}
@@ -318,14 +293,7 @@ class AzureDevOpsClient:
         files: dict[str, str],
         commit_message: str,
     ) -> dict[str, Any]:
-        """Push one or more files as a single commit to an existing branch.
-
-        Args:
-            branch_name: Target branch, e.g. "feature/agent-123".
-            files: Mapping of {path: content} to add/update.
-            commit_message: Commit message.
-        """
-        # Resolve the branch tip
+        """Push one or more files as a single commit to an existing branch."""
         url_refs = self._git_url("/refs")
         resp = await self._client.get(
             url_refs,
@@ -382,15 +350,7 @@ class AzureDevOpsClient:
         target_branch: str | None = None,
         work_item_ids: list[int] | None = None,
     ) -> dict[str, Any]:
-        """Create a pull request.
-
-        Args:
-            source_branch: e.g. "feature/agent-123".
-            title: PR title.
-            description: PR description (Markdown).
-            target_branch: Defaults to the configured default branch.
-            work_item_ids: Optional work item IDs to link.
-        """
+        """Create a pull request."""
         target = target_branch or self._branch
         body: dict[str, Any] = {
             "sourceRefName": f"refs/heads/{source_branch}",

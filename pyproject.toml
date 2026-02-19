@@ -20,9 +20,18 @@ dependencies = [
     "rich>=13.0",
     "typer>=0.12",
     "python-dotenv>=1.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "azure-identity>=1.17",
 ]
 
 [project.optional-dependencies]
+queue = [
+    "azure-servicebus>=7.12",
+]
+keyvault = [
+    "azure-keyvault-secrets>=4.8",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

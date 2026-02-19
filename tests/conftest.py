@@ -17,19 +17,7 @@ from src.config import Settings
 
 @pytest.fixture
 def settings() -> Settings:
-    """Default test settings with PAT auth (local dev mode)."""
-    return Settings(
-        azure_devops_org_url="https://dev.azure.com/test-org",
-        azure_devops_project="test-project",
-        azure_devops_repository="test-repo",
-        devops_auth_mode="pat",
-        azure_devops_pat="fake-pat-token",
-    )
-
-
-@pytest.fixture
-def settings_system_token() -> Settings:
-    """Test settings with System.AccessToken auth (pipeline mode)."""
+    """Default test settings with system_token auth."""
     return Settings(
         azure_devops_org_url="https://dev.azure.com/test-org",
         azure_devops_project="test-project",
@@ -40,22 +28,28 @@ def settings_system_token() -> Settings:
 
 
 @pytest.fixture
-def devops_client(settings: Settings) -> AzureDevOpsClient:
-    """Azure DevOps client initialized with PAT auth."""
-    return AzureDevOpsClient(settings)
+def settings_managed_identity() -> Settings:
+    """Test settings with Managed Identity auth (Container App mode)."""
+    return Settings(
+        azure_devops_org_url="https://dev.azure.com/test-org",
+        azure_devops_project="test-project",
+        azure_devops_repository="test-repo",
+        devops_auth_mode="managed_identity",
+        managed_identity_client_id="00000000-0000-0000-0000-000000000000",
+    )
 
 
 @pytest.fixture
-def devops_client_system(settings_system_token: Settings) -> AzureDevOpsClient:
-    """Azure DevOps client initialized with System.AccessToken auth."""
-    return AzureDevOpsClient(settings_system_token)
+def devops_client(settings: Settings) -> AzureDevOpsClient:
+    """Azure DevOps client initialized with system_token auth."""
+    return AzureDevOpsClient(settings)
 
 
 @pytest.fixture
 def mock_llm() -> AsyncMock:
     """Mock LLM that returns empty content by default.
 
-    Override `mock_llm.ainvoke.return_value` in individual tests.
+    Override ``mock_llm.ainvoke.return_value`` in individual tests.
     """
     llm = AsyncMock()
     llm.ainvoke.return_value = MagicMock(content="{}")

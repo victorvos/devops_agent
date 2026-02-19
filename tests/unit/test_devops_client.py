@@ -5,7 +5,7 @@ All external HTTP calls are mocked. Tests follow Arrange-Act-Assert.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -17,58 +17,49 @@ from src.config import DevOpsAuthMode, Settings
 class TestAuthModes:
     """Verify correct Authorization header for each auth mode."""
 
-    def test_pat_auth_produces_basic_header(self, settings: Settings) -> None:
-        # Arrange — settings fixture uses devops_auth_mode=pat
+    def test_managed_identity_produces_bearer_header(
+        self, settings_managed_identity: Settings
+    ) -> None:
+        # Arrange
+        mock_credential = MagicMock()
+        mock_credential.get_token.return_value = MagicMock(token="fake-mi-token")
+
+        # Act
+        with patch(
+            "src.clients.devops.ManagedIdentityCredential",
+            return_value=mock_credential,
+            create=True,
+        ):
+            with patch.dict(
+                "sys.modules",
+                {"azure.identity": MagicMock(ManagedIdentityCredential=lambda **kw: mock_credential)},
+            ):
+                header = _build_auth_header(settings_managed_identity)
+
+        # Assert
+        assert header == "Bearer fake-mi-token"
+
+    def test_system_token_auth_produces_bearer_header(
+        self, settings: Settings
+    ) -> None:
+        # Arrange — settings fixture uses devops_auth_mode=system_token
 
         # Act
         header = _build_auth_header(settings)
 
         # Assert
-        assert header.startswith("Basic ")
-
-    def test_system_token_auth_produces_bearer_header(
-        self, settings_system_token: Settings
-    ) -> None:
-        # Arrange — settings_system_token fixture uses devops_auth_mode=system_token
-
-        # Act
-        header = _build_auth_header(settings_system_token)
-
-        # Assert
         assert header == "Bearer fake-system-token"
 
-    def test_client_uses_bearer_in_pipeline_mode(
-        self, devops_client_system: AzureDevOpsClient
-    ) -> None:
-        # Arrange — devops_client_system is built with system_token auth
-
-        # Act
-        auth_header = devops_client_system._client.headers["authorization"]
-
-        # Assert
-        assert auth_header.startswith("Bearer ")
-
-    def test_client_uses_basic_in_pat_mode(
+    def test_client_uses_bearer_header(
         self, devops_client: AzureDevOpsClient
     ) -> None:
-        # Arrange — devops_client is built with PAT auth
+        # Arrange — devops_client is built with system_token auth
 
         # Act
         auth_header = devops_client._client.headers["authorization"]
 
         # Assert
-        assert auth_header.startswith("Basic ")
-
-    def test_missing_pat_raises_validation_error(self) -> None:
-        # Act & Assert
-        with pytest.raises(ValueError, match="AZURE_DEVOPS_PAT"):
-            Settings(
-                azure_devops_org_url="https://dev.azure.com/test",
-                azure_devops_project="proj",
-                azure_devops_repository="repo",
-                devops_auth_mode="pat",
-                azure_devops_pat="",
-            )
+        assert auth_header.startswith("Bearer ")
 
     def test_missing_system_token_raises_validation_error(self) -> None:
         # Act & Assert
