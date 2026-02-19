@@ -132,6 +132,10 @@ curl https://$FQDN/health
 # {"status":"healthy"}
 ```
 
+## Triggering from a work item
+
+To run the agent when someone comments `@agent` on a work item, set up a **service hook** in Azure DevOps and a **Power Automate** flow that POSTs to `https://<FQDN>/api/investigate`. Full steps: **[../docs/TRIGGER-FROM-WORK-ITEM.md](../docs/TRIGGER-FROM-WORK-ITEM.md)**.
+
 ---
 
 ## CLI Troubleshooting

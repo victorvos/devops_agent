@@ -253,9 +253,9 @@ uv run devops-agent investigate --work-item 1234 --type feature_request
 uv run devops-agent serve
 ```
 
-### Trigger from Azure DevOps (`@agent`)
+### Trigger from Azure DevOps (e.g. `@domeinteam_devops_agent`)
 
-Use **Power Automate** or a **Logic App** to bridge the service hook to the Container App API:
+Azure DevOps doesn’t call the agent directly. You connect a **service hook** (work item commented) to a **Power Automate** flow; the flow looks for a **keyword in the comment** (e.g. `@domeinteam_devops_agent`) and POSTs to the Container App. No Azure DevOps user with that name is required — it’s just the string the flow matches.
 
 ```mermaid
 sequenceDiagram
@@ -266,7 +266,7 @@ sequenceDiagram
     participant Agent as LangGraph Agent
     participant LLM as GPT 5.3
 
-    Dev->>ADO: Comment on WI #1234:<br/>"@agent investigate the auth bug"
+    Dev->>ADO: Comment on WI #1234:<br/>"@domeinteam_devops_agent investigate the auth bug"
     ADO->>PA: Service hook event<br/>(work item commented)
     PA->>PA: Parse @agent mention<br/>+ extract WI ID + context
     PA->>App: POST /api/investigate
@@ -282,14 +282,12 @@ sequenceDiagram
     ADO-->>Dev: Comment notification
 ```
 
-**Setup steps:**
+**Step-by-step:** See **[docs/TRIGGER-FROM-WORK-ITEM.md](docs/TRIGGER-FROM-WORK-ITEM.md)** for:
 
-1. In Azure DevOps, go to **Project Settings > Service hooks**
-2. Create a subscription: Event = **Work item commented on** → target = your Power Automate HTTP trigger
-3. In the Power Automate flow:
-   - Parse the comment text for `@agent`
-   - Extract the work item ID
-   - POST to `https://<your-container-app-fqdn>/api/investigate`
+1. Creating a Power Automate flow with an HTTP trigger (to receive the service hook).
+2. Parsing the payload and calling `POST https://<your-app>.azurecontainerapps.io/api/investigate` with `work_item_id`, `context`, and optional `request_type` / `report_only`.
+3. Creating the Azure DevOps service hook (e.g. **Work item commented**) and pointing it at the flow’s HTTP URL.
+4. Testing with a comment like *"@domeinteam_devops_agent investigate the auth bug"* on a work item (use whatever handle you configured in the flow).
 
 ### Trigger from MS Teams (`@agent`)
 
