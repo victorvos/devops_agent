@@ -199,6 +199,33 @@ curl https://$FQDN/health
 # {"status":"healthy"}
 ```
 
+---
+
+## Logging and debugging
+
+**Where to see logs**
+
+- **Azure Portal:** Your workload RG → Container App (e.g. `domeinteam-devops-agent-app`) → **Log stream** or **Monitoring** → **Logs**. All stdout/stderr from the app goes to Container Apps logging (and to Log Analytics if you have a Log Analytics workspace attached to the environment).
+- **CLI:**
+  ```bash
+  APP_NAME="${PROJECT_NAME//_/-}-app"
+  az containerapp logs show -n $APP_NAME -g $RG --follow
+  ```
+
+**Controlling verbosity**
+
+The app reads **`LOG_LEVEL`** from the container env (set in Bicep; default `INFO`). To trace errors and full request flow, set it to **`DEBUG`**:
+
+- **Redeploy with override:** Add to your Bicep container env, or after deploy:
+  ```bash
+  az containerapp update -n $APP_NAME -g $RG --set-env-vars "LOG_LEVEL=DEBUG"
+  ```
+- Then use **Log stream** or `az containerapp logs show ...` to see detailed logs (file fetch, plan, agent steps, API calls).
+
+**Tracing a request**
+
+Each investigation has a **`job_id`** (returned from `POST /api/investigate`). Log lines for that request include that id (e.g. `Started direct processing for job abc123`, `Job abc123 completed`). In Logs, filter or search by that `job_id` to follow one request end-to-end and debug failures.
+
 **Quick checklist (workload → running Container App):**  
 1) Workload RG + ACR, 2) Build image, 3) Deploy Bicep with **projectName** (e.g. `domeinteam_devops_agent`), 4) Add `AzureAIFoundryApiKey` to Key Vault, 5) Add MI to Azure DevOps, 6) Grant MI AcrPull on ACR, 7) Verify `/health`.
 

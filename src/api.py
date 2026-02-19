@@ -33,9 +33,22 @@ _job_store: dict[str, dict[str, Any]] = {}
 _sb_client: Any | None = None
 
 
+def _configure_logging() -> None:
+    """Configure logging from LOG_LEVEL so Container App and serve use it for errors and debug flow."""
+    from src.config import get_settings
+
+    settings = get_settings()
+    level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    logging.basicConfig(level=level, format=fmt, datefmt="%Y-%m-%dT%H:%M:%SZ", force=True)
+    # Ensure our log level is applied (basicConfig may have been set elsewhere)
+    logging.getLogger("src").setLevel(level)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _sb_client
+    _configure_logging()
     settings = get_settings()
 
     if settings.service_bus_connection_str:
