@@ -183,6 +183,62 @@ class TestWorkItems:
         # Assert
         assert wi["fields"]["System.Title"] == "Test Feature"
 
+    async def test_get_parent_work_item_returns_parent_when_present(
+        self, devops_client: AzureDevOpsClient
+    ) -> None:
+        # Child work item with parent relation
+        child_response = httpx.Response(
+            200,
+            json={
+                "id": 456,
+                "fields": {"System.Title": "Implement login"},
+                "relations": [
+                    {
+                        "rel": "System.LinkTypes.Hierarchy-Reverse",
+                        "url": "https://dev.azure.com/org/proj/_apis/wit/workItems/100",
+                    }
+                ],
+            },
+            request=httpx.Request("GET", "https://example.com"),
+        )
+        parent_response = httpx.Response(
+            200,
+            json={
+                "id": 100,
+                "fields": {
+                    "System.Title": "Auth feature",
+                    "System.Description": "User authentication",
+                    "System.WorkItemType": "Feature",
+                },
+            },
+            request=httpx.Request("GET", "https://example.com"),
+        )
+        with patch.object(
+            devops_client._client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.side_effect = [child_response, parent_response]
+            parent = await devops_client.get_parent_work_item(456)
+        assert parent is not None
+        assert parent["id"] == 100
+        assert parent["fields"]["System.Title"] == "Auth feature"
+        assert parent["fields"]["System.WorkItemType"] == "Feature"
+
+    async def test_get_parent_work_item_returns_none_when_no_parent(
+        self, devops_client: AzureDevOpsClient
+    ) -> None:
+        child_response = httpx.Response(
+            200,
+            json={
+                "id": 789,
+                "fields": {"System.Title": "Standalone item"},
+                "relations": [],
+            },
+            request=httpx.Request("GET", "https://example.com"),
+        )
+        with patch.object(devops_client._client, "get", new_callable=AsyncMock, return_value=child_response):
+            parent = await devops_client.get_parent_work_item(789)
+        assert parent is None
+
 
 class TestBranchOperations:
     async def test_create_branch_from_default(

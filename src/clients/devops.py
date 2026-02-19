@@ -16,6 +16,7 @@ Auth modes:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,6 +29,12 @@ logger = logging.getLogger(__name__)
 API_VERSION = "7.1"
 
 DEVOPS_API_SCOPE = "499b84ac-1321-427f-aa17-267ca6975798/.default"
+
+# Relation type for "parent" link (child → parent in hierarchy).
+PARENT_RELATION_TYPE = "System.LinkTypes.Hierarchy-Reverse"
+
+# URL pattern to extract work item id: .../workItems/123 or .../workItems/123?...
+_WIT_ID_RE = re.compile(r"/workitems/(\d+)(?:\?|$)", re.IGNORECASE)
 
 
 @dataclass
@@ -189,7 +196,7 @@ class AzureDevOpsClient:
     # ── Work items ───────────────────────────────────────────────
 
     async def get_work_item(self, work_item_id: int) -> dict[str, Any]:
-        """Fetch a single work item by ID with all fields."""
+        """Fetch a single work item by ID with all fields (includes relations when $expand=all)."""
         url = self._wit_url(f"/workitems/{work_item_id}")
         params: dict[str, Any] = {
             "$expand": "all",
@@ -198,6 +205,36 @@ class AzureDevOpsClient:
         resp = await self._client.get(url, params=params)
         resp.raise_for_status()
         return resp.json()
+
+    def _parent_work_item_id_from_relations(self, work_item: dict[str, Any]) -> int | None:
+        """Extract parent work item ID from a work item's relations, if present."""
+        relations = work_item.get("relations") or []
+        for rel in relations:
+            if rel.get("rel") != PARENT_RELATION_TYPE:
+                continue
+            url = rel.get("url") or ""
+            match = _WIT_ID_RE.search(url)
+            if match:
+                return int(match.group(1))
+        return None
+
+    async def get_parent_work_item(self, work_item_id: int) -> dict[str, Any] | None:
+        """Fetch the parent work item of the given work item, if it has one.
+
+        Uses the work item's relations (Hierarchy-Reverse = parent). Returns None
+        if there is no parent or the parent cannot be fetched.
+        """
+        try:
+            wi = await self.get_work_item(work_item_id)
+            parent_id = self._parent_work_item_id_from_relations(wi)
+            if parent_id is None:
+                return None
+            parent = await self.get_work_item(parent_id)
+            logger.info("Resolved parent work item #%d for WI #%d", parent_id, work_item_id)
+            return parent
+        except Exception as exc:
+            logger.warning("Could not fetch parent for work item #%d: %s", work_item_id, exc)
+            return None
 
     async def get_work_item_comments(self, work_item_id: int) -> list[dict[str, Any]]:
         """Fetch comments on a work item."""

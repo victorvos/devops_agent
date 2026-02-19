@@ -10,6 +10,7 @@ Guidelines:
 - Select 5–20 files maximum — prefer quality over quantity.
 - Prioritize: entry points, core modules, config files, related tests.
 - Include files that would need modification for the requested feature/fix.
+- If a parent work item (e.g. Feature or Epic) is provided, scope your selection to fit that parent so the feature is defined consistently.
 - Return your reasoning and a structured list of file paths with explanations.
 
 Repository structure:
@@ -26,6 +27,7 @@ Tags: {tags}
 
 Recent comments:
 {comments}
+{parent_block}
 
 Additional context from user:
 {request_text}
@@ -50,6 +52,7 @@ and produce a detailed, actionable report.
 Guidelines:
 - Be specific — reference exact file paths, function names, line ranges.
 - Identify dependencies, potential risks, and edge cases.
+- If a parent work item (e.g. Feature or Epic) is provided, phrase the feature and recommendations so they fit that parent’s scope and wording.
 - If the request is a feature: propose file changes (new files + modifications).
 - If the request is a bug: identify root cause and propose a fix.
 - If the request is an investigation: provide findings and recommendations.
@@ -61,6 +64,7 @@ Work item #{work_item_id}: {title}
 
 Description:
 {description}
+{parent_block}
 
 Request type: {request_type}
 

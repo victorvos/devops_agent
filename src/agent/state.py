@@ -48,6 +48,12 @@ class AgentState(BaseModel):
     work_item_tags: list[str] = Field(default_factory=list)
     work_item_comments: list[str] = Field(default_factory=list)
 
+    # ── Parent work item (Epic/Feature) for scoping ─────────────
+    parent_work_item_id: int | None = None
+    parent_work_item_type: str = ""  # e.g. "Feature", "Epic"
+    parent_work_item_title: str = ""
+    parent_work_item_description: str = ""
+
     # ── Repository context ───────────────────────────────────────
     repo_tree_summary: str = ""  # condensed view of repo structure
 

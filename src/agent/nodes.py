@@ -31,6 +31,21 @@ from src.utils.tokens import build_context_block
 logger = logging.getLogger(__name__)
 
 
+def _format_parent_block(state: AgentState) -> str:
+    """Format parent work item context for prompts, or empty string if no parent."""
+    if not state.parent_work_item_id:
+        return ""
+    parts = [
+        "",
+        f"Parent work item (#{state.parent_work_item_id}, {state.parent_work_item_type or 'Parent'}): {state.parent_work_item_title}",
+    ]
+    if state.parent_work_item_description:
+        parts.append("Parent description:")
+        parts.append(state.parent_work_item_description)
+    parts.append("")
+    return "\n".join(parts)
+
+
 def _extract_json(text: str) -> dict[str, Any]:
     """Best-effort JSON extraction from LLM output (handles markdown fences)."""
     # Try direct parse first
@@ -79,6 +94,15 @@ async def receive_request(
             comments = await devops.get_work_item_comments(state.work_item_id)
             updates["work_item_comments"] = [c.get("text", "") for c in comments[:10]]
 
+            # Fetch parent work item (e.g. Feature/Epic) for scoping and clearer feature definition
+            parent = await devops.get_parent_work_item(state.work_item_id)
+            if parent:
+                pfields = parent.get("fields", {})
+                updates["parent_work_item_id"] = parent.get("id")
+                updates["parent_work_item_type"] = pfields.get("System.WorkItemType", "")
+                updates["parent_work_item_title"] = pfields.get("System.Title", "")
+                updates["parent_work_item_description"] = pfields.get("System.Description", "")
+
             logger.info("Loaded work item #%d: %s", state.work_item_id, updates["work_item_title"])
         except Exception as exc:
             logger.error("Failed to fetch work item #%s: %s", state.work_item_id, exc)
@@ -117,6 +141,7 @@ async def plan_files(
         description=state.work_item_description,
         tags=", ".join(state.work_item_tags) if state.work_item_tags else "none",
         comments="\n".join(state.work_item_comments[:5]) if state.work_item_comments else "none",
+        parent_block=_format_parent_block(state),
         request_text=state.request_text,
     )
 
@@ -182,6 +207,7 @@ async def reason(
         work_item_id=state.work_item_id or "N/A",
         title=state.work_item_title or state.request_text[:100],
         description=state.work_item_description or state.request_text,
+        parent_block=_format_parent_block(state),
         request_type=state.request_type or "investigation",
         context_block=context_block,
     )
