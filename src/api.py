@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
 
     if settings.service_bus_connection_str:
         try:
-            from azure.servicebus.aio import ServiceBusClient
+            from azure.servicebus.aio import ServiceBusClient  # pyright: ignore[reportMissingImports]
 
             _sb_client = ServiceBusClient.from_connection_string(
                 settings.service_bus_connection_str,
@@ -137,7 +137,7 @@ async def investigate(body: InvestigateRequest) -> InvestigateResponse:
     if _sb_client:
         import json
 
-        from azure.servicebus import ServiceBusMessage
+        from azure.servicebus import ServiceBusMessage  # pyright: ignore[reportMissingImports]
 
         settings = get_settings()
         async with _sb_client.get_queue_sender(settings.service_bus_queue_name) as sender:
