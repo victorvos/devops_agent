@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.config import Settings
+from src.core.config import Settings
 
 
 class TestBranchPrefix:

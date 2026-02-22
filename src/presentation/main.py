@@ -26,11 +26,11 @@ from rich.logging import RichHandler
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-from src.agent.graph import build_graph
-from src.agent.state import AgentState
-from src.clients.devops import AzureDevOpsClient
-from src.clients.llm import get_chat_model
-from src.config import get_settings
+from src.infrastructure.agent.graph import build_graph
+from src.core.agent.state import AgentState
+from src.infrastructure.clients.devops import AzureDevOpsClient
+from src.infrastructure.clients.llm import get_chat_model
+from src.core.config import get_settings
 
 app = typer.Typer(
     name="devops-agent",
@@ -79,7 +79,12 @@ async def _run_agent(
         console.print(f"[dim]Context:[/dim] {request_text[:200] or '(from work item)'}\n")
 
         with console.status("[bold green]Agent working..."):
-            result = await graph.ainvoke(initial_state)
+            try:
+                # Wait up to 5 minutes (300 seconds) for the agent to complete
+                result = await asyncio.wait_for(graph.ainvoke(initial_state), timeout=300.0)
+            except asyncio.TimeoutError:
+                console.print("[bold red]Error:[/bold red] Agent invocation timed out after 5 minutes.")
+                sys.exit(1)
 
         console.print()
         if isinstance(result, dict):
@@ -142,11 +147,11 @@ def serve(
     """Start the FastAPI server (for Container App deployment)."""
     import uvicorn
 
-    uvicorn.run("src.api:app", host=host, port=port)
+    uvicorn.run("src.presentation.api:app", host=host, port=port)
 
 
 def main() -> None:
-    """Entry point for direct ``python -m src.main`` execution."""
+    """Entry point for direct ``python -m src.presentation.main`` execution."""
     app()
 
 

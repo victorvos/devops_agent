@@ -115,6 +115,12 @@ class Settings(BaseSettings):
         description="Queue name for agent work items",
     )
 
+    # ── Job Store (Azure Table Storage) ──────────────────────────
+    azure_table_connection_str: str = Field(
+        default="",
+        description="Azure Table Storage connection string for global job states. If empty, uses in-memory store.",
+    )
+
     # ── Key Vault (Container App deployment) ─────────────────────
     key_vault_url: str = Field(
         default="",

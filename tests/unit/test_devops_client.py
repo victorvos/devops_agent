@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from src.clients.devops import AzureDevOpsClient, _build_auth_header
-from src.config import DevOpsAuthMode, Settings
+from src.infrastructure.clients.devops import AzureDevOpsClient, _build_auth_header
+from src.core.config import DevOpsAuthMode, Settings
 
 
 class TestAuthModes:
@@ -26,7 +26,7 @@ class TestAuthModes:
 
         # Act
         with patch(
-            "src.clients.devops.ManagedIdentityCredential",
+            "src.infrastructure.clients.devops.ManagedIdentityCredential",
             return_value=mock_credential,
             create=True,
         ):

@@ -21,8 +21,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+from tenacity import (
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
-from src.config import DevOpsAuthMode, Settings
+from src.core.config import DevOpsAuthMode, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +41,26 @@ PARENT_RELATION_TYPE = "System.LinkTypes.Hierarchy-Reverse"
 
 # URL pattern to extract work item id: .../workItems/123 or .../workItems/123?...
 _WIT_ID_RE = re.compile(r"/workitems/(\d+)(?:\?|$)", re.IGNORECASE)
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """Determine if an httpx exception is transient and should be retried."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        # Retry on 429 Too Many Requests and 5xx Server Errors
+        return exc.response.status_code == 429 or exc.response.status_code >= 500
+    if isinstance(exc, httpx.RequestError):
+        # Retry on network/connection errors (ConnectError, ReadTimeout, etc.)
+        return True
+    return False
+
+
+# Base decorator for external GET/read calls
+_devops_retry = retry(
+    retry=retry_if_exception(_is_transient_error),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
 
 
 @dataclass
@@ -111,6 +137,7 @@ class AzureDevOpsClient:
 
     # ── Repository tree ──────────────────────────────────────────
 
+    @_devops_retry
     async def get_repo_tree(self, scope_path: str = "/", depth: int = 2) -> RepoTree:
         """Fetch the repository file/folder tree at *scope_path*.
 
@@ -144,6 +171,7 @@ class AzureDevOpsClient:
 
     # ── File contents ────────────────────────────────────────────
 
+    @_devops_retry
     async def get_file_content(self, path: str, branch: str | None = None) -> FileItem:
         """Download a single file's content via the Items endpoint."""
         url = self._git_url("/items")
@@ -187,14 +215,15 @@ class AzureDevOpsClient:
             try:
                 item = await self.get_file_content(path, branch)
                 results.append(item)
-            except httpx.HTTPStatusError as exc:
-                logger.warning("Failed to fetch %s: %s", path, exc.response.status_code)
+            except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+                logger.warning("Failed to fetch %s: %s", path, str(exc))
 
         logger.info("Fetched %d/%d files", len(results), len(limited))
         return results
 
     # ── Work items ───────────────────────────────────────────────
 
+    @_devops_retry
     async def get_work_item(self, work_item_id: int) -> dict[str, Any]:
         """Fetch a single work item by ID with all fields (includes relations when $expand=all)."""
         url = self._wit_url(f"/workitems/{work_item_id}")
@@ -236,6 +265,7 @@ class AzureDevOpsClient:
             logger.warning("Could not fetch parent for work item #%d: %s", work_item_id, exc)
             return None
 
+    @_devops_retry
     async def get_work_item_comments(self, work_item_id: int) -> list[dict[str, Any]]:
         """Fetch comments on a work item."""
         url = self._wit_url(f"/workitems/{work_item_id}/comments")
@@ -290,6 +320,7 @@ class AzureDevOpsClient:
 
     # ── Branch operations ────────────────────────────────────────
 
+    @_devops_retry
     async def get_default_branch_ref(self) -> str:
         """Get the latest commit (objectId) of the default branch."""
         url = self._git_url("/refs")

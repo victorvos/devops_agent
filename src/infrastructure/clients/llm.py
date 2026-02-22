@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from src.config import LLMProvider, Settings
+from src.core.config import LLMProvider, Settings
 
 
 def get_chat_model(settings: Settings) -> BaseChatModel:
@@ -35,6 +35,7 @@ def get_chat_model(settings: Settings) -> BaseChatModel:
                 api_version=settings.azure_ai_foundry_api_version,
                 temperature=0.1,
                 max_tokens=8192,
+                max_retries=3,
             )
 
         case LLMProvider.AZURE_OPENAI:
@@ -47,6 +48,7 @@ def get_chat_model(settings: Settings) -> BaseChatModel:
                 api_version=settings.azure_openai_api_version,
                 temperature=0.1,
                 max_tokens=4096,
+                max_retries=3,
             )
 
         case LLMProvider.OPENAI:
@@ -57,6 +59,7 @@ def get_chat_model(settings: Settings) -> BaseChatModel:
                 model=settings.openai_model,
                 temperature=0.1,
                 max_tokens=4096,
+                max_retries=3,
             )
 
         case LLMProvider.ANTHROPIC:
@@ -67,6 +70,7 @@ def get_chat_model(settings: Settings) -> BaseChatModel:
                 model_name=settings.anthropic_model,
                 temperature=0.1,
                 max_tokens=4096,
+                max_retries=3,
             )
 
         case _:

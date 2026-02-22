@@ -21,21 +21,23 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 
-from src.config import get_settings
+from src.core.config import get_settings
+
+from src.core.interfaces.job_store import JobStore
 
 logger = logging.getLogger(__name__)
 
-_job_store: dict[str, dict[str, Any]] = {}
+_job_store: JobStore | None = None
 
 _sb_client: Any | None = None
 
 
 def _configure_logging() -> None:
     """Configure logging from LOG_LEVEL so Container App and serve use it for errors and debug flow."""
-    from src.config import get_settings
+    from src.core.config import get_settings
 
     settings = get_settings()
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
@@ -47,9 +49,20 @@ def _configure_logging() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _sb_client
+    global _sb_client, _job_store
     _configure_logging()
     settings = get_settings()
+
+    if settings.azure_table_connection_str:
+        from src.infrastructure.repositories.job_store import AzureTableJobStore
+        _job_store = AzureTableJobStore(settings.azure_table_connection_str)
+        logger.info("Using Azure Table Storage for job state")
+    else:
+        from src.infrastructure.repositories.job_store import InMemoryJobStore
+        _job_store = InMemoryJobStore()
+        logger.info("Using in-memory store for job state")
+
+    await _job_store.initialize()
 
     if settings.service_bus_connection_str:
         try:
@@ -69,6 +82,9 @@ async def lifespan(app: FastAPI):
 
     if _sb_client:
         await _sb_client.close()
+    
+    if _job_store:
+        await getattr(_job_store, "close", lambda: None)()
 
 
 app = FastAPI(
@@ -77,6 +93,18 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next: Any) -> Any:
+    """Add standard security headers to all responses."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    return response
 
 
 # ── Request / Response models ────────────────────────────────────
@@ -107,7 +135,7 @@ class JobStatus(BaseModel):
 
 async def _run_agent_direct(job_id: str, payload: dict[str, Any]) -> None:
     """Run the agent in-process as a background task."""
-    from src.worker import _process_message
+    from src.presentation.worker import _process_message
 
     try:
         await _process_message(payload)
@@ -123,7 +151,7 @@ async def health() -> dict[str, str]:
 
 
 @app.post("/api/investigate", response_model=InvestigateResponse)
-async def investigate(body: InvestigateRequest) -> InvestigateResponse:
+async def investigate(body: InvestigateRequest, background_tasks: BackgroundTasks) -> InvestigateResponse:
     """Accept an investigation request.
 
     If Service Bus is configured, enqueues the message for the worker.
@@ -139,13 +167,8 @@ async def investigate(body: InvestigateRequest) -> InvestigateResponse:
         "report_only": body.report_only,
     }
 
-    _job_store[job_id] = {
-        "status": "queued",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": None,
-        "result": None,
-        "error": None,
-    }
+    if _job_store:
+        await _job_store.create_job(job_id, payload)
 
     if _sb_client:
         import json
@@ -164,7 +187,7 @@ async def investigate(body: InvestigateRequest) -> InvestigateResponse:
         logger.info("Enqueued job %s for WI #%d", job_id, body.work_item_id)
         return InvestigateResponse(job_id=job_id, status="queued", message="Job enqueued for processing")
 
-    asyncio.create_task(_run_agent_direct(job_id, payload))
+    background_tasks.add_task(_run_agent_direct, job_id, payload)
     logger.info("Started direct processing for job %s (WI #%d)", job_id, body.work_item_id)
     return InvestigateResponse(job_id=job_id, status="processing", message="Job started (direct mode)")
 
@@ -172,14 +195,17 @@ async def investigate(body: InvestigateRequest) -> InvestigateResponse:
 @app.get("/api/status/{job_id}", response_model=JobStatus)
 async def job_status(job_id: str) -> JobStatus:
     """Poll for the status of a previously submitted job."""
-    job = _job_store.get(job_id)
+    if not _job_store:
+        raise HTTPException(status_code=500, detail="Job store not initialized")
+
+    job = await _job_store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     return JobStatus(
         job_id=job_id,
-        status=job["status"],
-        created_at=job["created_at"],
+        status=job.get("status", "unknown"),
+        created_at=job.get("created_at", ""),
         completed_at=job.get("completed_at"),
         result=job.get("result"),
         error=job.get("error"),

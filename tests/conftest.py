@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agent.state import AgentState
-from src.clients.devops import AzureDevOpsClient
-from src.config import Settings
+from src.core.agent.state import AgentState
+from src.infrastructure.clients.devops import AzureDevOpsClient
+from src.core.config import Settings
 
 
 @pytest.fixture

@@ -19,16 +19,16 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import END, StateGraph
 
-from src.agent.nodes import (
+from src.infrastructure.agent.nodes import (
     create_output,
     fetch_files,
     plan_files,
     reason,
     receive_request,
 )
-from src.agent.state import AgentState
-from src.clients.devops import AzureDevOpsClient
-from src.config import Settings
+from src.core.agent.state import AgentState
+from src.infrastructure.clients.devops import AzureDevOpsClient
+from src.core.config import Settings
 
 logger = logging.getLogger(__name__)
 

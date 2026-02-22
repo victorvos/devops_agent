@@ -12,7 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api import app, _job_store
+from src.presentation.api import app
+from src.infrastructure.repositories.job_store import InMemoryJobStore
 
 
 def _ensure_azure_servicebus_mock():
@@ -26,11 +27,13 @@ def _ensure_azure_servicebus_mock():
 
 
 @pytest.fixture(autouse=True)
-def _clear_job_store():
+def job_store():
     """Ensure the in-process job store is empty before each test."""
-    _job_store.clear()
-    yield
-    _job_store.clear()
+    import src.presentation.api
+    store = InMemoryJobStore()
+    src.presentation.api._job_store = store
+    yield store
+    src.presentation.api._job_store = None
 
 
 @pytest.fixture
@@ -67,8 +70,8 @@ class TestInvestigateEndpoint:
 
         # Act
         with (
-            patch("src.api._sb_client", mock_sb),
-            patch("src.api.get_settings", return_value=mock_settings),
+            patch("src.presentation.api._sb_client", mock_sb),
+            patch("src.presentation.api.get_settings", return_value=mock_settings),
         ):
             response = client.post(
                 "/api/investigate",
@@ -92,8 +95,8 @@ class TestInvestigateEndpoint:
 
         # Act
         with (
-            patch("src.api._sb_client", None),
-            patch("src.api._run_agent_direct", new_callable=AsyncMock) as mock_run,
+            patch("src.presentation.api._sb_client", None),
+            patch("src.presentation.api._run_agent_direct", new_callable=AsyncMock) as mock_run,
         ):
             response = client.post(
                 "/api/investigate",
@@ -115,9 +118,9 @@ class TestInvestigateEndpoint:
 
 
 class TestStatusEndpoint:
-    def test_status_returns_queued_job(self, client: TestClient) -> None:
+    def test_status_returns_queued_job(self, client: TestClient, job_store: InMemoryJobStore) -> None:
         # Arrange
-        _job_store["test-123"] = {
+        job_store._store["test-123"] = {
             "status": "queued",
             "created_at": "2026-02-16T12:00:00+00:00",
             "completed_at": None,
@@ -134,9 +137,9 @@ class TestStatusEndpoint:
         assert data["job_id"] == "test-123"
         assert data["status"] == "queued"
 
-    def test_status_returns_completed_job(self, client: TestClient) -> None:
+    def test_status_returns_completed_job(self, client: TestClient, job_store: InMemoryJobStore) -> None:
         # Arrange
-        _job_store["test-456"] = {
+        job_store._store["test-456"] = {
             "status": "completed",
             "created_at": "2026-02-16T12:00:00+00:00",
             "completed_at": "2026-02-16T12:01:30+00:00",
@@ -160,9 +163,9 @@ class TestStatusEndpoint:
         # Assert
         assert response.status_code == 404
 
-    def test_status_returns_failed_job(self, client: TestClient) -> None:
+    def test_status_returns_failed_job(self, client: TestClient, job_store: InMemoryJobStore) -> None:
         # Arrange
-        _job_store["test-err"] = {
+        job_store._store["test-err"] = {
             "status": "failed",
             "created_at": "2026-02-16T12:00:00+00:00",
             "completed_at": "2026-02-16T12:00:05+00:00",

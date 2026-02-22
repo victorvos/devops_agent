@@ -18,15 +18,15 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.agent.prompts import (
+from src.infrastructure.agent.prompts import (
     PLAN_FILES_SYSTEM,
     PLAN_FILES_USER,
     REASON_SYSTEM,
     REASON_USER,
 )
-from src.agent.state import AgentAction, AgentState, PlannedFile
-from src.clients.devops import AzureDevOpsClient
-from src.utils.tokens import build_context_block
+from src.core.agent.state import AgentAction, AgentState, PlannedFile
+from src.infrastructure.clients.devops import AzureDevOpsClient
+from src.core.utils.tokens import build_context_block
 
 logger = logging.getLogger(__name__)
 

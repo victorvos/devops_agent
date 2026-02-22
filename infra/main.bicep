@@ -62,6 +62,7 @@ var identityName = '${sanitized}-id'
 var envName = '${sanitized}-env'
 var appName = '${sanitized}-app'
 var sbNamespaceName = '${sanitized}-sb'
+var storageAccountName = toLower('${take(replace(projectName, '_', ''), 15)}st${uniqueString(resourceGroup().id)}')
 var keyVaultName = '${take(replace(projectName, '_', ''), 11)}kv${uniqueString(resourceGroup().id)}'
 
 // ═══════════════════════════════════════════════════════════════
@@ -106,6 +107,19 @@ resource containerAppEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
       internal: false
     } : null
     zoneRedundant: false
+  }
+}
+
+// Workload Storage Account — used for distributed Job Store (Azure Tables)
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: storageAccountName
+  location: location
+  sku: { name: 'Standard_LRS' }
+  kind: 'StorageV2'
+  properties: {
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    allowBlobPublicAccess: false
   }
 }
 
@@ -155,10 +169,21 @@ resource serviceBusConnectionSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-0
   }
 }
 
+var secretNameTableAuth = 'AzureTableConnectionString'
+
+// Store Table Storage connection string in Key Vault 
+resource tableConnectionSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: secretNameTableAuth
+  properties: {
+    value: 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};EndpointSuffix=${environment().suffixes.storage};AccountKey=${storageAccount.listKeys().keys[0].value}'
+  }
+}
+
 resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: appName
   location: location
-  dependsOn: concat([keyVault, containerAppEnv], deployServiceBus ? [serviceBusConnectionSecret] : [])
+  dependsOn: concat([keyVault, containerAppEnv, storageAccount, tableConnectionSecret], deployServiceBus ? [serviceBusConnectionSecret] : [])
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -193,6 +218,11 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             keyVaultUrl: '${keyVault.properties.vaultUri}secrets/${secretNameAIFoundryApiKey}'
             identity: managedIdentity.id
           }
+          {
+            name: 'table-connection'
+            keyVaultUrl: '${keyVault.properties.vaultUri}secrets/${secretNameTableAuth}'
+            identity: managedIdentity.id
+          }
         ]
       )
     }
@@ -219,7 +249,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               { name: 'LOG_LEVEL', value: 'INFO' }
             ],
             deployServiceBus ? [{ name: 'SERVICE_BUS_CONNECTION_STR', secretRef: 'sb-connection' }] : [],
-            [{ name: 'AZURE_AI_FOUNDRY_API_KEY', secretRef: 'ai-foundry-api-key' }]
+            [
+              { name: 'AZURE_AI_FOUNDRY_API_KEY', secretRef: 'ai-foundry-api-key' }
+              { name: 'AZURE_TABLE_CONNECTION_STR', secretRef: 'table-connection' }
+            ]
           )
         }
       ]

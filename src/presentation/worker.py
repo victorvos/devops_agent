@@ -14,35 +14,45 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from src.agent.graph import build_graph
-from src.agent.state import AgentState
-from src.clients.devops import AzureDevOpsClient
-from src.clients.llm import get_chat_model
-from src.config import get_settings
+from src.infrastructure.agent.graph import build_graph
+from src.core.agent.state import AgentState
+from src.infrastructure.clients.devops import AzureDevOpsClient
+from src.infrastructure.clients.llm import get_chat_model
+from src.core.config import get_settings
+
+from src.core.interfaces.job_store import JobStore
 
 logger = logging.getLogger(__name__)
 
 # In-process job store shared with the API (imported lazily to avoid
 # circular imports when the worker is started independently).
-_job_store: dict[str, dict[str, Any]] | None = None
+_job_store: JobStore | None = None
 
 
-def _get_job_store() -> dict[str, dict[str, Any]]:
+async def _get_job_store() -> JobStore:
     global _job_store
     if _job_store is None:
         try:
-            from src.api import _job_store as api_store
-
-            _job_store = api_store
+            from src.presentation.api import _job_store as api_store
+            _job_store = api_store  # type: ignore
         except ImportError:
-            _job_store = {}
+            pass
+            
+        if _job_store is None:
+            settings = get_settings()
+            if settings.azure_table_connection_str:
+                from src.infrastructure.repositories.job_store import AzureTableJobStore
+                _job_store = AzureTableJobStore(settings.azure_table_connection_str)
+            else:
+                from src.infrastructure.repositories.job_store import InMemoryJobStore
+                _job_store = InMemoryJobStore()
+            await _job_store.initialize()
     return _job_store
 
 
-def _update_job(job_id: str, **fields: Any) -> None:
-    store = _get_job_store()
-    if job_id in store:
-        store[job_id].update(fields)
+async def _update_job(job_id: str, **fields: Any) -> None:
+    store = await _get_job_store()
+    await store.update_job(job_id, **fields)
 
 
 async def _process_message(payload: dict[str, Any]) -> None:
@@ -54,7 +64,7 @@ async def _process_message(payload: dict[str, Any]) -> None:
     report_only: bool = payload.get("report_only", True)
 
     logger.info("Processing job %s — WI #%d (%s)", job_id, work_item_id, request_type)
-    _update_job(job_id, status="processing")
+    await _update_job(job_id, status="processing")
 
     settings = get_settings()
     devops = AzureDevOpsClient(settings)
@@ -71,11 +81,12 @@ async def _process_message(payload: dict[str, Any]) -> None:
         if report_only:
             initial_state.max_iterations = 1
 
-        result = await graph.ainvoke(initial_state)
+        # Wait up to 5 minutes (300 seconds) for the agent to complete
+        result = await asyncio.wait_for(graph.ainvoke(initial_state), timeout=300.0)
 
         state = AgentState(**result) if isinstance(result, dict) else result
 
-        _update_job(
+        await _update_job(
             job_id,
             status="completed",
             completed_at=datetime.now(timezone.utc).isoformat(),
@@ -88,9 +99,18 @@ async def _process_message(payload: dict[str, Any]) -> None:
         )
         logger.info("Job %s completed for WI #%d", job_id, work_item_id)
 
+    except asyncio.TimeoutError:
+        logger.error("Job %s timed out after 5 minutes", job_id)
+        await _update_job(
+            job_id,
+            status="failed",
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            error="Agent invocation timed out after 5 minutes.",
+        )
+        raise
     except Exception as exc:
         logger.exception("Job %s failed: %s", job_id, exc)
-        _update_job(
+        await _update_job(
             job_id,
             status="failed",
             completed_at=datetime.now(timezone.utc).isoformat(),

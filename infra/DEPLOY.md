@@ -18,6 +18,7 @@ Names are derived from **projectName** (e.g. `domeinteam_devops_agent` → under
 |----------|------|---------|
 | Managed Identity | `<project>-id` | Auth to DevOps API, ACR pull, Key Vault access |
 | Key Vault | `<project>kv<unique>` | Project-scoped vault for all agent credentials |
+| Storage Account | `<project>st<unique>` | Table Storage for distributed job state management |
 | Container App Env | `<project>-env` | Hosting environment |
 | Container App | `<project>-app` | The agent (FastAPI + uvicorn) |
 
@@ -35,6 +36,7 @@ Without Service Bus, the app processes requests **directly** in a background tas
 | Secret name | Who creates it | Purpose |
 |-------------|-----------------|---------|
 | `AzureAIFoundryApiKey` | **You** (after deploy) | AI Foundry API key; required for the app to call the LLM |
+| `AzureTableConnectionString` | **Bicep** (always) | Azure Table Storage connection string |
 | `ServiceBusConnectionString` | **Bicep** (when `deployServiceBus=true`) | Service Bus connection string; only present if you deploy Service Bus |
 
 ---

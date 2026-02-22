@@ -23,6 +23,8 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "azure-identity>=1.17",
+    "tenacity>=8.0",
+    "azure-data-tables>=12.4",
 ]
 
 [project.optional-dependencies]
@@ -41,7 +43,7 @@ dev = [
 ]
 
 [project.scripts]
-devops-agent = "src.main:app"
+devops-agent = "src.presentation.main:app"
 
 [build-system]
 requires = ["hatchling"]

@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agent.nodes import _extract_json, plan_files, reason
-from src.agent.state import AgentAction, AgentState
-from src.utils.tokens import build_context_block, count_tokens, truncate_to_budget
+from src.infrastructure.agent.nodes import _extract_json, plan_files, reason
+from src.core.agent.state import AgentAction, AgentState
+from src.core.utils.tokens import build_context_block, count_tokens, truncate_to_budget
 
 
 class TestExtractJSON:

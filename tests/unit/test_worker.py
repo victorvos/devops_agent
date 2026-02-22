@@ -10,15 +10,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.worker import _process_message, _update_job
+from src.presentation.worker import _process_message, _update_job
 
 
 @pytest.fixture(autouse=True)
 def _patch_job_store():
     """Provide a clean in-process job store for each test."""
     store: dict = {}
-    with patch("src.worker._job_store", store):
-        with patch("src.worker._get_job_store", return_value=store):
+    with patch("src.presentation.worker._job_store", store):
+        with patch("src.presentation.worker._get_job_store", return_value=store):
             yield store
 
 
@@ -92,10 +92,10 @@ class TestProcessMessage:
 
         # Act
         with (
-            patch("src.worker.get_settings") as mock_get_settings,
-            patch("src.worker.AzureDevOpsClient", return_value=mock_devops),
-            patch("src.worker.get_chat_model", return_value=MagicMock()),
-            patch("src.worker.build_graph", return_value=mock_graph),
+            patch("src.presentation.worker.get_settings") as mock_get_settings,
+            patch("src.presentation.worker.AzureDevOpsClient", return_value=mock_devops),
+            patch("src.presentation.worker.get_chat_model", return_value=MagicMock()),
+            patch("src.presentation.worker.build_graph", return_value=mock_graph),
         ):
             mock_get_settings.return_value = MagicMock()
             await _process_message(payload)
@@ -126,10 +126,10 @@ class TestProcessMessage:
 
         # Act & Assert
         with (
-            patch("src.worker.get_settings", return_value=MagicMock()),
-            patch("src.worker.AzureDevOpsClient", return_value=mock_devops),
-            patch("src.worker.get_chat_model", return_value=MagicMock()),
-            patch("src.worker.build_graph", return_value=mock_graph),
+            patch("src.presentation.worker.get_settings", return_value=MagicMock()),
+            patch("src.presentation.worker.AzureDevOpsClient", return_value=mock_devops),
+            patch("src.presentation.worker.get_chat_model", return_value=MagicMock()),
+            patch("src.presentation.worker.build_graph", return_value=mock_graph),
         ):
             with pytest.raises(RuntimeError, match="LLM unavailable"):
                 await _process_message(payload)
