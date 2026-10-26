@@ -4,36 +4,61 @@ __pycache__/
 *$py.class
 *.so
 *.egg-info/
+.eggs/
 dist/
 build/
 *.egg
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.pytype/
+.hypothesis/
 
 # Virtual environments
 .venv/
 venv/
 env/
+ENV/
 
 # Environment variables
 .env
+.env.*
+!.env.example
 
-# IDE
+# IDE / editors
 .vscode/
 .idea/
 *.swp
 *.swo
+*.iml
+*.code-workspace
 
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Testing
+# Testing / coverage
 .pytest_cache/
 htmlcov/
 .coverage
+.coverage.*
+coverage.xml
 
 # Logs
 *.log
 logs/
 
-# uv
+# uv / Python version managers
 .python-version
+
+# Bicep / Azure
+.azure/
+*.azurite
+bin/
+obj/
+local.settings.json
+
+# Node (Teams Toolkit / local tooling)
+node_modules/
