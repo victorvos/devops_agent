@@ -6,10 +6,65 @@ Built with [LangGraph](https://github.com/langchain-ai/langgraph), [Azure AI Fou
 
 Deployed as a lightweight **Container App** with a single HTTP API. Queue processing via Service Bus is optional. Triggered via **`@agent`** mentions in Azure DevOps work item comments, Microsoft Teams, or direct API calls.
 
+This repository also includes an **enterprise orchestrator** (`src/app/`) for **100% keyless Entra ID** (Managed Identity + Workload Identity Federation + Snowflake External OAuth + M365 On-Behalf-Of), **corporate MS Teams & Outlook triggers** behind DevBox firewalls, **M365 Copilot Retrieval grounding + Solution Fitting + PBI creation**, and a **dbt + Snowflake `DbtSnowflakeQueryPlannerService`**.
+
+GitHub is **only a transfer host**. Build, deploy, Boards, Repos, and Pipelines run in the corporate **Azure DevOps + Azure + Microsoft** environment. CI/CD is **Azure Pipelines only** (`.azure-pipelines/azure-pipelines.yml` and `.azure-pipelines/dbt-ci-snowflake.yml`).
+
+## Importing from GitHub into Corporate Azure DevOps
+
+After the PR is merged (or from this branch), import the repo into the corporate Azure DevOps project, then run pipelines there — do not add GitHub Actions.
+
+**Option A — Azure CLI import** (creates the ADO repo and pulls GitHub once):
+
+```bash
+az repos create --org "https://dev.azure.com/<ADO_ORG>" --project "<ADO_PROJECT>" --name devops_agent
+
+az repos import create \
+  --org "https://dev.azure.com/<ADO_ORG>" \
+  --project "<ADO_PROJECT>" \
+  --repository devops_agent \
+  --git-source-url https://github.com/victorvos/devops_agent.git
+```
+
+**Option B — `git push --mirror`** (full history, all branches/tags):
+
+```bash
+git clone --bare https://github.com/victorvos/devops_agent.git
+cd devops_agent.git
+git push --mirror "https://dev.azure.com/<ADO_ORG>/<ADO_PROJECT>/_git/devops_agent"
+```
+
+Then on the corporate DevBox:
+
+```bash
+git clone "https://dev.azure.com/<ADO_ORG>/<ADO_PROJECT>/_git/devops_agent"
+cd devops_agent
+uv sync --all-extras
+```
+
+Create two Azure Pipelines from this repo (YAML):
+
+| Pipeline YAML | Purpose |
+|---------------|---------|
+| `.azure-pipelines/azure-pipelines.yml` | Lint/test + keyless Bicep deploy of ACA via WIF Service Connection `sc-entra-wif-lgorchestrator` |
+| `.azure-pipelines/dbt-ci-snowflake.yml` | PR slim CI: Snowflake zero-copy clone + `dbt build --select state:modified+` |
+
+Workload Identity Federation for that service connection (no GitHub OIDC):
+
+| Field | Value |
+|-------|--------|
+| Issuer | `https://vstoken.dev.azure.com/<ADO_ORG_ID>` |
+| Subject | `sc://<ADO_ORG>/<ADO_PROJECT>/<SERVICE_CONNECTION_NAME>` |
+| Audience | `api://AzureADTokenExchange` |
+
+`scripts/bootstrap-oidc-and-graph.sh` creates that federated credential on the Entra app used by the ARM service connection.
+
 ## Table of Contents
 
+- [Importing from GitHub into Corporate Azure DevOps](#importing-from-github-into-corporate-azure-devops)
 - [Why targeted retrieval?](#why-targeted-retrieval)
 - [Architecture](#architecture)
+- [Enterprise orchestrator](#enterprise-orchestrator)
 - [Setup](#setup)
 - [Configuration](#configuration)
 - [Usage](#usage)
@@ -23,14 +78,22 @@ Deployed as a lightweight **Container App** with a single HTTP API. Queue proces
 
 ## Why Targeted Retrieval?
 
+<details>
+<summary>GitHub Mobile — diagram outline</summary>
+
+1. **Traditional - expensive:** Full repo clone (2-10 min) → Stuff into LLM (100k-500k tokens) → Poor quality output
+2. **This agent - cost-efficient:** Read work item (seconds) → Plan 5-20 files → Fetch only relevant files via Git REST API (5k-30k tokens) → High quality analysis
+
+</details>
+
 ```mermaid
 graph LR
-    subgraph "Traditional (expensive)"
+    subgraph traditional["Traditional - expensive"]
         A[Full repo clone] -->|2-10 min| B[Stuff into LLM]
         B -->|100k-500k tokens| C[Poor quality output]
     end
 
-    subgraph "This agent (cost-efficient)"
+    subgraph cost_efficient["This agent - cost-efficient"]
         D["Read work item"] -->|seconds| E["Plan 5-20 files"]
         E -->|Git REST API| F["Fetch only relevant files"]
         F -->|5k-30k tokens| G[High quality analysis]
@@ -60,34 +123,43 @@ graph LR
 
 ### End-to-end flow
 
+<details>
+<summary>GitHub Mobile — diagram outline</summary>
+
+**Triggers:** Azure DevOps Service Hook, MS Teams `@agent` mention, CLI / curl, Power Automate → FastAPI `POST /api/investigate` → LangGraph Agent, which talks to Azure DevOps REST API and Azure AI Foundry GPT 5.3 using Managed Identity.
+
+</details>
+
 ```mermaid
 flowchart TB
     subgraph triggers["Trigger Sources"]
-        T1["Azure DevOps\nService Hook"]
-        T2["MS Teams\n@agent mention"]
+        T1["Azure DevOps<br/>Service Hook"]
+        T2["MS Teams<br/>@agent mention"]
         T3["CLI / curl"]
         T4["Power Automate"]
     end
 
     subgraph containerApp["Azure Container App"]
         direction TB
-        API["FastAPI\nPOST /api/investigate"]
+        API["FastAPI<br/>POST /api/investigate"]
         Agent["LangGraph Agent"]
         API -->|"direct or via queue"| Agent
     end
 
     subgraph azure["Azure Services"]
         MI["Managed Identity"]
-        ADO["Azure DevOps\nREST API"]
-        LLM["Azure AI Foundry\nGPT 5.3"]
+        ADO["Azure DevOps<br/>REST API"]
+        LLM["Azure AI Foundry<br/>GPT 5.3"]
     end
 
     T1 -->|"POST"| API
     T4 -->|"POST"| API
     T2 --> T4
     T3 -->|"POST"| API
-    Agent <--> ADO
-    Agent <--> LLM
+    Agent --> ADO
+    ADO --> Agent
+    Agent --> LLM
+    LLM --> Agent
     containerApp --> MI
 
     %% Styling
@@ -112,6 +184,13 @@ flowchart TB
 
 ### LangGraph agent detail
 
+<details>
+<summary>GitHub Mobile — diagram outline</summary>
+
+`receive_request` → `plan_files` → `fetch_files` → `reason` (may loop back to `plan_files` up to 3 times) → `create_output` (work item comment, optional branch + PR).
+
+</details>
+
 ```mermaid
 flowchart TB
     START(( )) --> N1
@@ -126,7 +205,7 @@ flowchart TB
     N3 --> N4
 
     N4["reason<br/>Analyze code against work item.<br/>Produce report + suggested changes."]
-    N4 -->|"needs_more_context<br/>(up to 3 iterations)"| N2
+    N4 -->|"needs_more_context<br/>up to 3 iterations"| N2
     N4 -->|"done"| N5
 
     N5["create_output<br/>Post comment on work item.<br/>Optionally create branch + PR."]
@@ -141,6 +220,93 @@ flowchart TB
     style N4 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
     style N5 fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#000000
 ```
+
+---
+
+## Enterprise orchestrator
+
+The existing targeted-retrieval agent (`src/core/`, `src/infrastructure/`, `src/presentation/`) is unchanged. Alongside it, `src/app/` adds a keyless enterprise orchestrator for corporate DevBox, Teams, Outlook, M365 Copilot, and dbt/Snowflake. Deep-dive diagrams live in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+### What it adds
+
+1. **Corporate MS Teams & Outlook triggers across firewalls**
+   - **Pattern A (Zero-Public-IP VNet):** Graph → Event Grid Partner Topic → Service Bus `q-teams-outlook-triggers` over Private Endpoints.
+   - **Pattern B (Direct Graph webhooks + auto-renewal):** `/api/v1/webhooks/graph` and `/api/v1/webhooks/graph/lifecycle`.
+   - **Pattern C (Keyless Azure Bot Service):** `msaAppType: UserAssignedMSI` plus `teams-app/manifest.json`.
+2. **M365 Copilot grounding + Solution Fitting + PBI creation**
+   - `src/app/services/m365_copilot_grounding.py` queries `/beta/copilot/retrieval` and Graph Search with OBO (ACL-respecting) or `Sites.Selected` fallback.
+   - `plan_action` drafts a Solution Fit analysis and an Azure Boards PBI spec.
+3. **dbt + Snowflake External OAuth & query planner**
+   - `src/app/services/snowflake_dbt.py` uses Entra External OAuth (`authenticator="oauth"`).
+   - `DbtSnowflakeQueryPlannerService` (`src/app/services/query_planner_service.py`) emits read-only compiled SQL + `dbt show` / `dbt compile` and pre-flights `EXPLAIN USING TEXT`.
+4. **HITL Adaptive Cards** in Teams (`/api/v1/bot/messages`) and Outlook (`/api/v1/outlook/action`).
+5. **DevBox firewall whitelisting** via ACA `ipSecurityRestrictions` and `devBoxAllowedCidrs` in `infra/enterprise.bicep`.
+
+<details>
+<summary>GitHub Mobile — enterprise flow outline</summary>
+
+Teams / Outlook / DevBox → Bot Service or Graph webhooks → FastAPI on ACA → LangGraph (`ingest_event` → `ground_context` → `plan_action` → `human_approval_gate` → `execute_ado_action`) → Azure Boards PBI + dbt PR + Snowflake slim CI.
+
+</details>
+
+```mermaid
+flowchart TB
+    subgraph ent_triggers["1. Corporate MS Teams, Outlook and DevBox"]
+        TeamsBot["MS Teams @LangGraph mention<br/>or Channel Post"]
+        OutlookMail["Outlook shared mailbox<br/>ai-orchestrator@contoso.com"]
+        DevBox["Whitelisted corporate DevBox<br/>POST /api/v1/dev/invoke"]
+    end
+
+    subgraph ent_ingress["2. Firewall-safe Azure ingress"]
+        BotSvc["Azure Bot Service UserAssignedMSI<br/>MsTeamsChannel + OutlookChannel"]
+        EventGrid["Graph webhooks / Event Grid<br/>Partner Topic to Service Bus"]
+        FastAPI["ACA FastAPI ingress"]
+    end
+
+    subgraph ent_graph["3. Stateful LangGraph on ACA"]
+        N1["1. ingest_event"]
+        N2["2. ground_context"]
+        N3["3. plan_action"]
+        N4["4. human_approval_gate"]
+        N5["5. execute_ado_action"]
+    end
+
+    TeamsBot --> BotSvc --> FastAPI
+    OutlookMail --> EventGrid --> FastAPI
+    DevBox --> FastAPI
+    FastAPI --> N1 --> N2 --> N3 --> N4 --> N5
+
+    %% Styling
+    style TeamsBot fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style OutlookMail fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style DevBox fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000000
+    style BotSvc fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style EventGrid fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style FastAPI fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style N1 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style N2 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style N3 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000000
+    style N4 fill:#fff8e1,stroke:#e65100,stroke-width:2px,color:#000000
+    style N5 fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#000000
+```
+
+Local invoke (DevBox):
+
+```bash
+curl -X POST http://localhost:8000/api/v1/dev/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"thread_id":"dev-1","channel_origin":"devbox","prompt":"Add churn risk to mart_customer_churn","operation":"create_pbi_and_pr"}'
+```
+
+Read-only Snowflake query plan:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/snowflake/query-plan \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Show churn risk by segment","dbt_model_name":"mart_customer_churn","limit":50}'
+```
+
+Enterprise IaC is `infra/enterprise.bicep` (VNet, ACA IP restrictions, keyless Bot Service, Snowflake OAuth config). The original lightweight agent deploy remains `infra/main.bicep` — see [infra/DEPLOY.md](infra/DEPLOY.md).
 
 ---
 
@@ -197,9 +363,16 @@ Key settings in `.env`:
 
 All authentication uses **Managed Identity** — no PATs, no stored secrets. The Bicep deployment creates a User-assigned MI and grants it the required roles automatically.
 
+<details>
+<summary>GitHub Mobile — diagram outline</summary>
+
+Container App production: Managed Identity → Bearer token → Azure DevOps API; Managed Identity → AcrPull → Container Registry.
+
+</details>
+
 ```mermaid
 flowchart LR
-    subgraph "Container App (production)"
+    subgraph prod_aca["Container App - production"]
         MI["Managed Identity"]
         MI -->|"Bearer token"| ADO["Azure DevOps API"]
         MI -->|"AcrPull"| ACR["Container Registry"]
@@ -257,6 +430,13 @@ uv run devops-agent serve
 
 Azure DevOps doesn’t call the agent directly. You connect a **service hook** (work item commented) to a **Power Automate** flow; the flow looks for a **keyword in the comment** (e.g. `@domeinteam_devops_agent`) and POSTs to the Container App. No Azure DevOps user with that name is required — it’s just the string the flow matches.
 
+<details>
+<summary>GitHub Mobile — sequence outline</summary>
+
+Developer comments `@domeinteam_devops_agent investigate the auth bug` on WI #1234 → Azure DevOps service hook → Power Automate parses mention → `POST /api/investigate` → LangGraph fetches WI, plans files, analyzes, posts report comment.
+
+</details>
+
 ```mermaid
 sequenceDiagram
     participant Dev as Developer
@@ -293,6 +473,13 @@ sequenceDiagram
 
 Same approach — Power Automate flow triggered by a Teams message containing `@agent`:
 
+<details>
+<summary>GitHub Mobile — sequence outline</summary>
+
+Team member `@agent investigate #1234` in MS Teams → Power Automate (keyword `@agent`) → `POST /api/investigate` → full investigation flow (plan, fetch, reason, output).
+
+</details>
+
 ```mermaid
 sequenceDiagram
     participant User as Team Member
@@ -308,7 +495,7 @@ sequenceDiagram
     App-->>PA: {"job_id": "...", "status": "processing"}
     App->>Agent: Background task
     Agent->>Agent: Full investigation flow
-    Note over Agent: plan > fetch > reason > output
+    Note over Agent: plan then fetch then reason then output
 ```
 
 ---
@@ -346,6 +533,12 @@ Without Service Bus the app processes requests directly — no queue overhead. A
 
 See **[infra/DEPLOY.md](infra/DEPLOY.md)** for the full step-by-step guide with CLI troubleshooting.
 
+Enterprise orchestrator (VNet, DevBox CIDRs, Teams/Outlook Bot, Snowflake OAuth):
+
+```bash
+az deployment group create -g $RG -f infra/enterprise.bicep -p infra/enterprise.bicepparam
+```
+
 ### Scaling
 
 The Container App is configured to scale between 0 and 3 replicas. It scales to zero when idle, keeping costs minimal. HTTP-based scaling adds replicas when concurrent requests increase.
@@ -378,15 +571,24 @@ Default mode is **report-only** (`report_only: true`) — the agent posts its an
 
 ## Cost Efficiency
 
+<details>
+<summary>GitHub Mobile — cost outline</summary>
+
+**Per request:** Azure DevOps API 10-30 calls (free) + Azure AI Foundry 5k-30k tokens ($0.02-$0.20) + Container App 30s-2min (scale to zero).
+
+**Monthly estimate - 100 requests:** LLM $2-$20 + Container App ~$5 = **~$7-$25/month**.
+
+</details>
+
 ```mermaid
 graph LR
-    subgraph "Per request cost breakdown"
+    subgraph per_req["Per request cost breakdown"]
         direction TB
-        A1["Azure DevOps API<br/>~10-30 calls<br/>FREE (included)"] --- A2["Azure AI Foundry<br/>~5k-30k tokens<br/>$0.02-$0.20"]
+        A1["Azure DevOps API<br/>~10-30 calls<br/>FREE - included"] --- A2["Azure AI Foundry<br/>~5k-30k tokens<br/>$0.02-$0.20"]
         A2 --- A3["Container App<br/>~30s-2min<br/>scale to zero"]
     end
 
-    subgraph "Monthly estimate (100 requests)"
+    subgraph monthly_est["Monthly estimate - 100 requests"]
         direction TB
         B1["LLM: $2 - $20"]
         B2["Container App: ~$5"]
@@ -413,6 +615,7 @@ GPT 5.3 via Azure AI Foundry supports ~400k token context windows, but this agen
 ```bash
 uv run pytest
 uv run pytest tests/unit/ -v
+uv run pytest tests/test_blueprint.py -v
 uv run pytest -v --cov=src --cov-report=html
 ```
 
@@ -432,6 +635,12 @@ docker build -t devops-agent .
 docker run -p 8000:8000 --env-file .env devops-agent
 ```
 
+Enterprise orchestrator (Teams / Outlook / dbt query planner):
+
+```bash
+PYTHONPATH=src uvicorn app.main:app --app-dir src --host 0.0.0.0 --port 8000
+```
+
 ---
 
 ## Project Structure
@@ -439,35 +648,52 @@ docker run -p 8000:8000 --env-file .env devops-agent
 ```
 devops_agent/
 ├── src/
-│   ├── main.py                 # CLI entry point — investigate, request, serve
-│   ├── api.py                  # FastAPI app (direct mode or queued via Service Bus)
-│   ├── worker.py               # Service Bus queue consumer (optional)
-│   ├── config.py               # Pydantic settings from env vars
-│   ├── agent/
-│   │   ├── graph.py            # LangGraph graph definition
-│   │   ├── nodes.py            # Node functions (plan, fetch, reason, output)
-│   │   ├── prompts.py          # LLM prompt templates
-│   │   └── state.py            # Agent state (Pydantic model)
-│   ├── clients/
-│   │   ├── devops.py           # Azure DevOps REST API client (httpx)
-│   │   └── llm.py              # LLM client factory (AI Foundry / OpenAI / Anthropic)
-│   └── utils/
-│       └── tokens.py           # Token counting & context budget management
+│   ├── presentation/
+│   │   ├── main.py             # CLI entry point — investigate, request, serve
+│   │   ├── api.py              # FastAPI app (direct mode or queued via Service Bus)
+│   │   └── worker.py           # Service Bus queue consumer (optional)
+│   ├── core/
+│   │   ├── config.py           # Pydantic settings from env vars
+│   │   ├── agent/state.py      # Agent state (Pydantic model)
+│   │   └── utils/tokens.py     # Token counting & context budget
+│   ├── infrastructure/
+│   │   ├── agent/              # LangGraph graph, nodes, prompts
+│   │   ├── clients/
+│   │   │   ├── devops.py       # Azure DevOps REST API client (httpx)
+│   │   │   └── llm.py          # LLM client factory (AI Foundry / OpenAI / Anthropic)
+│   │   └── repositories/       # In-memory + Azure Table job store
+│   └── app/                    # Enterprise orchestrator (Teams, Outlook, M365, dbt/Snowflake)
+│       ├── main.py             # FastAPI: Graph webhooks, Bot, Outlook, query-plan
+│       ├── graph/orchestrator.py
+│       └── services/           # M365 Copilot, Snowflake, ADO PBI/PR, Adaptive Cards
 ├── infra/
-│   ├── main.bicep              # All infrastructure (projectName-based)
-│   ├── parameters.bicepparam   # Environment-specific values
-│   └── DEPLOY.md               # Step-by-step deployment + CLI troubleshooting
+│   ├── main.bicep              # Existing lightweight agent (projectName-based)
+│   ├── parameters.bicepparam
+│   ├── DEPLOY.md               # Step-by-step deployment + CLI troubleshooting
+│   ├── enterprise.bicep        # Keyless ACA + VNet + Bot + Snowflake OAuth
+│   ├── enterprise.bicepparam
+│   ├── modules/                # network, identity, aca, ai, triggers, postgres
+│   └── snowflake/entra_external_oauth_setup.sql
+├── docs/
+│   ├── TRIGGER-FROM-WORK-ITEM.md
+│   └── ARCHITECTURE.md
+├── .azure-pipelines/
+│   ├── azure-pipelines.yml     # Keyless WIF: test + Bicep/ACA deploy (ADO only)
+│   └── dbt-ci-snowflake.yml    # PR slim CI: Snowflake clone + dbt build
+├── teams-app/manifest.json
+├── scripts/bootstrap-oidc-and-graph.sh   # ADO WIF federated credential + Graph roles
 ├── tests/
 │   ├── conftest.py             # Shared fixtures
+│   ├── test_blueprint.py       # Enterprise orchestrator tests
 │   └── unit/
-│       ├── test_agent.py       # Agent node tests
-│       ├── test_api.py         # API endpoint tests
-│       ├── test_worker.py      # Worker tests
-│       └── test_devops_client.py  # DevOps client tests
+│       ├── test_agent.py
+│       ├── test_api.py
+│       ├── test_worker.py
+│       └── test_devops_client.py
 ├── Dockerfile                  # Container image (python:3.12-slim + uv)
 ├── .env.example
 ├── .gitignore
-├── pyproject.toml              # Project metadata & deps (uv-managed)
+├── pyproject.toml              # Project metadata & deps (uv-managed, ProGet index)
 └── README.md
 ```
 

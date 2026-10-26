@@ -1,0 +1,68 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.17",
+  "version": "1.0.0",
+  "id": "{{UAMI_CLIENT_ID}}",
+  "developer": {
+    "name": "Platform Engineering",
+    "websiteUrl": "https://dev.azure.com/your-enterprise-org",
+    "privacyUrl": "https://dev.azure.com/your-enterprise-org",
+    "termsOfUseUrl": "https://dev.azure.com/your-enterprise-org"
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "name": {
+    "short": "LangGraph Architect",
+    "full": "Azure + LangGraph Enterprise DevOps Orchestrator"
+  },
+  "description": {
+    "short": "Keyless LangGraph agent for grounded Azure DevOps PRs with HITL approvals.",
+    "full": "Trigger enterprise architecture plans, hybrid AI Search grounding, and guarded Azure DevOps branches/PRs from Microsoft Teams or Outlook with interactive Adaptive Card approvals."
+  },
+  "accentColor": "#0078D4",
+  "bots": [
+    {
+      "botId": "{{UAMI_CLIENT_ID}}",
+      "scopes": [
+        "personal",
+        "team",
+        "groupChat"
+      ],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": [
+            "personal",
+            "team",
+            "groupChat"
+          ],
+          "commands": [
+            {
+              "title": "plan",
+              "description": "Ground against enterprise docs and propose an Azure DevOps PR plan"
+            },
+            {
+              "title": "status",
+              "description": "Check the checkpoint status of the current thread"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "validDomains": [
+    "*.azurecontainerapps.io",
+    "token.botframework.com"
+  ],
+  "webApplicationInfo": {
+    "id": "{{UAMI_CLIENT_ID}}",
+    "resource": "api://botid-{{UAMI_CLIENT_ID}}"
+  }
+}

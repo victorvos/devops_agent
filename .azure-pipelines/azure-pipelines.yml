@@ -1,0 +1,82 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  # In corporate environments with private endpoints, switch to your self-hosted DevBox/ScaleSet agent pool:
+  # name: 'corp-private-linux-pool'
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # Name of the Azure DevOps Service Connection configured with Workload Identity Federation (Keyless OIDC)
+  azureServiceConnection: 'sc-entra-wif-lgorchestrator'
+  resourceGroupName: 'rg-lgorchestrator-dev'
+  location: 'westeurope'
+  workloadName: 'lgorchestrator'
+  environmentName: 'dev'
+
+stages:
+  - stage: ValidateAndTest
+    displayName: '1. Validate Python & Bicep'
+    jobs:
+      - job: UnitTests
+        displayName: 'Run FastAPI & Guardrail Tests'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.12'
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -e ".[dev]"
+              PYTHONPATH=src pytest -v
+            displayName: 'Install & Run Pytest'
+
+          - task: AzureCLI@2
+            displayName: 'Bicep Build & What-If Check'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az bicep build --file infra/enterprise.bicep
+                az deployment group what-if \
+                  --resource-group $(resourceGroupName) \
+                  --template-file infra/enterprise.bicep \
+                  --parameters infra/enterprise.bicepparam
+
+  - stage: DeployInfraAndApp
+    displayName: '2. Deploy Bicep & Container App (Keyless WIF)'
+    dependsOn: ValidateAndTest
+    jobs:
+      - job: Deploy
+        displayName: 'Deploy Infrastructure & Container Revision'
+        steps:
+          - task: AzureCLI@2
+            displayName: 'Deploy Bicep, Push ACR Image & Update ACA'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+
+                echo "Deploying Bicep templates..."
+                DEPLOY_OUT=$(az deployment group create \
+                  --resource-group $(resourceGroupName) \
+                  --template-file infra/enterprise.bicep \
+                  --parameters infra/enterprise.bicepparam \
+                  --query "properties.outputs" -o json)
+
+                ACR_SERVER=$(echo "$DEPLOY_OUT" | jq -r '.acrLoginServer.value')
+                ACR_NAME="${ACR_SERVER%%.*}"
+                IMAGE_TAG="${ACR_SERVER}/$(workloadName):$(Build.SourceVersion)"
+
+                echo "Building and pushing container image via keyless ACR Task / token..."
+                az acr build --registry "$ACR_NAME" --image "$(workloadName):$(Build.SourceVersion)" .
+
+                echo "Updating Azure Container App revision..."
+                az containerapp update \
+                  --name "ca-$(workloadName)-$(environmentName)" \
+                  --resource-group $(resourceGroupName) \
+                  --image "$IMAGE_TAG"

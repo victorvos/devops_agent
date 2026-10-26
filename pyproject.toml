@@ -1,7 +1,7 @@
 [project]
 name = "devops-agent"
-version = "0.1.0"
-description = "An intelligent Azure DevOps agent that uses targeted retrieval to handle feature requests and backlog investigations"
+version = "0.2.0"
+description = "Azure DevOps targeted-retrieval agent plus keyless LangGraph orchestrator for M365 Copilot, Teams/Outlook, and dbt/Snowflake"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -33,6 +33,12 @@ queue = [
 ]
 keyvault = [
     "azure-keyvault-secrets>=4.8",
+]
+enterprise = [
+    "PyJWT[crypto]>=2.9.0",
+    "langgraph-checkpoint-postgres>=2.0.2",
+    "psycopg[binary,pool]>=3.2.0",
+    "snowflake-connector-python>=3.12.0",
 ]
 dev = [
     "pytest>=8.0",
@@ -83,6 +89,7 @@ line-length = 120
 select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.pytest.ini_options]
+pythonpath = ["src", "."]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 

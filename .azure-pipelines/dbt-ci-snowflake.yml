@@ -1,0 +1,87 @@
+# ============================================================================
+# Azure DevOps Pull Request CI Pipeline for dbt + Snowflake (Slim CI)
+# Triggered automatically when the LangGraph Orchestrator opens a dbt PR
+# after Human-in-the-Loop Adaptive Card approval in MS Teams or Outlook.
+# Uses 100% Keyless Entra ID Workload Identity Federation -> Snowflake External OAuth.
+# ============================================================================
+
+trigger: none
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - models/**
+      - macros/**
+      - seeds/**
+      - snapshots/**
+      - dbt_project.yml
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  azureServiceConnection: 'sc-entra-wif-lgorchestrator'
+  snowflakeAccount: 'xy12345.west-europe.azure'
+  snowflakeOAuthScope: 'api://snowflake-entra-resource-id/.default'
+  snowflakeWarehouse: 'WH_CI_DBT_XS'
+  snowflakeRole: 'RL_DBT_CI_PR'
+  prodDatabase: 'ANALYTICS_PROD'
+  prCloneDatabase: 'ANALYTICS_PR_$(System.PullRequest.PullRequestId)'
+
+stages:
+  - stage: DbtSlimCI
+    displayName: 'Snowflake Zero-Copy Clone + dbt Slim CI (Keyless OAuth)'
+    jobs:
+      - job: RunDbtBuild
+        displayName: 'Clone Prod Metadata & Run dbt build --select state:modified+'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.12'
+
+          - script: |
+              python -m pip install --upgrade pip
+              pip install dbt-core dbt-snowflake snowflake-connector-python
+            displayName: 'Install dbt-snowflake'
+
+          - task: AzureCLI@2
+            displayName: 'Acquire Entra OAuth Token, Zero-Copy Clone & Run dbt Slim CI'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+
+                echo "1. Acquiring keyless Entra ID External OAuth token for Snowflake..."
+                export SNOWFLAKE_OAUTH_TOKEN=$(az account get-access-token \
+                  --scope "$(snowflakeOAuthScope)" \
+                  --query accessToken -o tsv)
+
+                echo "2. Creating Snowflake zero-copy clone $(prCloneDatabase) from $(prodDatabase)..."
+                python3 -c "
+                import os, snowflake.connector
+                conn = snowflake.connector.connect(
+                    account='$(snowflakeAccount)',
+                    authenticator='oauth',
+                    token=os.environ['SNOWFLAKE_OAUTH_TOKEN'],
+                    role='$(snowflakeRole)',
+                    warehouse='$(snowflakeWarehouse)',
+                )
+                cur = conn.cursor()
+                cur.execute('CREATE OR REPLACE DATABASE $(prCloneDatabase) CLONE $(prodDatabase)')
+                cur.close()
+                conn.close()
+                "
+
+                echo "3. Running dbt build on modified models + downstream tests..."
+                dbt deps
+                dbt build --select state:modified+ --defer --state ./prod-manifest-artifacts
+            env:
+              DBT_SNOWFLAKE_ACCOUNT: $(snowflakeAccount)
+              DBT_SNOWFLAKE_ROLE: $(snowflakeRole)
+              DBT_SNOWFLAKE_WAREHOUSE: $(snowflakeWarehouse)
+              DBT_SNOWFLAKE_DATABASE: $(prCloneDatabase)
