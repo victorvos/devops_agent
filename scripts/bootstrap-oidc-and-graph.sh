@@ -1,35 +1,46 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Bootstrap Script:
+# Bootstrap Script (Azure DevOps + Entra ID — no GitHub Actions):
 # 1. Configures Workload Identity Federation (OIDC) on a Deployment Identity
-#    for GitHub Actions.
-# 2. Assigns Microsoft Graph App Roles (ChatMessage.Send / Mail.Send) to the
-#    ACA User-Assigned Managed Identity (since Graph App Roles are Microsoft
-#    Graph directory objects rather than Azure RM resources).
+#    for an Azure DevOps ARM Service Connection.
+#    Issuer:  https://vstoken.dev.azure.com/<ADO_ORG_ID>
+#    Subject: sc://<ADO_ORG>/<ADO_PROJECT>/<SERVICE_CONNECTION_NAME>
+# 2. Assigns Microsoft Graph App Roles (Mail.Send) to the ACA User-Assigned
+#    Managed Identity (Graph App Roles are directory objects, not ARM).
 # ============================================================================
 set -euo pipefail
 
 TENANT_ID="${AZURE_TENANT_ID:-$(az account show --query tenantId -o tsv)}"
 SUBSCRIPTION_ID="${AZURE_SUBSCRIPTION_ID:-$(az account show --query id -o tsv)}"
 RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-lgorchestrator-dev}"
-GITHUB_REPO="${GITHUB_REPO:-your-github-username/azure-langgraph-blueprint}"
-GITHUB_ENV="${GITHUB_ENV_NAME:-dev}"
 UAMI_NAME="${UAMI_NAME:-id-lgorchestrator-dev}"
 
-echo "==> [1/2] Configuring GitHub OIDC Federated Credential (if DEPLOY_APP_OBJECT_ID is set)..."
+# Azure DevOps organization (friendly name), org GUID, project, and WIF service connection
+ADO_ORG="${ADO_ORG:-your-ado-org}"
+ADO_ORG_ID="${ADO_ORG_ID:-00000000-0000-0000-0000-000000000000}"
+ADO_PROJECT="${ADO_PROJECT:-DataPlatform}"
+SERVICE_CONNECTION_NAME="${SERVICE_CONNECTION_NAME:-sc-entra-wif-lgorchestrator}"
+
+echo "==> Tenant ${TENANT_ID} / subscription ${SUBSCRIPTION_ID}"
+echo "==> [1/2] Configuring Azure DevOps WIF Federated Credential (if DEPLOY_APP_OBJECT_ID is set)..."
 if [[ -n "${DEPLOY_APP_OBJECT_ID:-}" ]]; then
   az ad app federated-credential create \
     --id "$DEPLOY_APP_OBJECT_ID" \
     --parameters "{
-      \"name\": \"github-oidc-${GITHUB_ENV}\",
-      \"issuer\": \"https://token.actions.githubusercontent.com\",
-      \"subject\": \"repo:${GITHUB_REPO}:environment:${GITHUB_ENV}\",
-      \"description\": \"Keyless OIDC deployment from GitHub Actions\",
+      \"name\": \"ado-wif-${SERVICE_CONNECTION_NAME}\",
+      \"issuer\": \"https://vstoken.dev.azure.com/${ADO_ORG_ID}\",
+      \"subject\": \"sc://${ADO_ORG}/${ADO_PROJECT}/${SERVICE_CONNECTION_NAME}\",
+      \"description\": \"Keyless OIDC from Azure DevOps Service Connection ${SERVICE_CONNECTION_NAME}\",
       \"audiences\": [\"api://AzureADTokenExchange\"]
     }"
-  echo "    Federated credential created for repo:${GITHUB_REPO}:environment:${GITHUB_ENV}"
+  echo "    Federated credential created:"
+  echo "      issuer:  https://vstoken.dev.azure.com/${ADO_ORG_ID}"
+  echo "      subject: sc://${ADO_ORG}/${ADO_PROJECT}/${SERVICE_CONNECTION_NAME}"
+  echo "    In Azure DevOps: Project Settings > Service connections > ${SERVICE_CONNECTION_NAME}"
+  echo "    (Azure Resource Manager + Workload Identity federation, no client secret)."
 else
-  echo "    Skipping step 1 (set DEPLOY_APP_OBJECT_ID to create GitHub federated credential)."
+  echo "    Skipping step 1 (set DEPLOY_APP_OBJECT_ID, ADO_ORG, ADO_ORG_ID, ADO_PROJECT,"
+  echo "    SERVICE_CONNECTION_NAME to create the Azure DevOps federated credential)."
 fi
 
 echo "==> [2/2] Assigning Microsoft Graph App Roles to ACA User-Assigned Managed Identity..."

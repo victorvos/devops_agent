@@ -8,8 +8,60 @@ Deployed as a lightweight **Container App** with a single HTTP API. Queue proces
 
 This repository also includes an **enterprise orchestrator** (`src/app/`) for **100% keyless Entra ID** (Managed Identity + Workload Identity Federation + Snowflake External OAuth + M365 On-Behalf-Of), **corporate MS Teams & Outlook triggers** behind DevBox firewalls, **M365 Copilot Retrieval grounding + Solution Fitting + PBI creation**, and a **dbt + Snowflake `DbtSnowflakeQueryPlannerService`**.
 
+GitHub is **only a transfer host**. Build, deploy, Boards, Repos, and Pipelines run in the corporate **Azure DevOps + Azure + Microsoft** environment. CI/CD is **Azure Pipelines only** (`.azure-pipelines/azure-pipelines.yml` and `.azure-pipelines/dbt-ci-snowflake.yml`).
+
+## Importing from GitHub into Corporate Azure DevOps
+
+After the PR is merged (or from this branch), import the repo into the corporate Azure DevOps project, then run pipelines there — do not add GitHub Actions.
+
+**Option A — Azure CLI import** (creates the ADO repo and pulls GitHub once):
+
+```bash
+az repos create --org "https://dev.azure.com/<ADO_ORG>" --project "<ADO_PROJECT>" --name devops_agent
+
+az repos import create \
+  --org "https://dev.azure.com/<ADO_ORG>" \
+  --project "<ADO_PROJECT>" \
+  --repository devops_agent \
+  --git-source-url https://github.com/victorvos/devops_agent.git
+```
+
+**Option B — `git push --mirror`** (full history, all branches/tags):
+
+```bash
+git clone --bare https://github.com/victorvos/devops_agent.git
+cd devops_agent.git
+git push --mirror "https://dev.azure.com/<ADO_ORG>/<ADO_PROJECT>/_git/devops_agent"
+```
+
+Then on the corporate DevBox:
+
+```bash
+git clone "https://dev.azure.com/<ADO_ORG>/<ADO_PROJECT>/_git/devops_agent"
+cd devops_agent
+uv sync --all-extras
+```
+
+Create two Azure Pipelines from this repo (YAML):
+
+| Pipeline YAML | Purpose |
+|---------------|---------|
+| `.azure-pipelines/azure-pipelines.yml` | Lint/test + keyless Bicep deploy of ACA via WIF Service Connection `sc-entra-wif-lgorchestrator` |
+| `.azure-pipelines/dbt-ci-snowflake.yml` | PR slim CI: Snowflake zero-copy clone + `dbt build --select state:modified+` |
+
+Workload Identity Federation for that service connection (no GitHub OIDC):
+
+| Field | Value |
+|-------|--------|
+| Issuer | `https://vstoken.dev.azure.com/<ADO_ORG_ID>` |
+| Subject | `sc://<ADO_ORG>/<ADO_PROJECT>/<SERVICE_CONNECTION_NAME>` |
+| Audience | `api://AzureADTokenExchange` |
+
+`scripts/bootstrap-oidc-and-graph.sh` creates that federated credential on the Entra app used by the ARM service connection.
+
 ## Table of Contents
 
+- [Importing from GitHub into Corporate Azure DevOps](#importing-from-github-into-corporate-azure-devops)
 - [Why targeted retrieval?](#why-targeted-retrieval)
 - [Architecture](#architecture)
 - [Enterprise orchestrator](#enterprise-orchestrator)
@@ -625,8 +677,11 @@ devops_agent/
 ├── docs/
 │   ├── TRIGGER-FROM-WORK-ITEM.md
 │   └── ARCHITECTURE.md
+├── .azure-pipelines/
+│   ├── azure-pipelines.yml     # Keyless WIF: test + Bicep/ACA deploy (ADO only)
+│   └── dbt-ci-snowflake.yml    # PR slim CI: Snowflake clone + dbt build
 ├── teams-app/manifest.json
-├── scripts/bootstrap-oidc-and-graph.sh
+├── scripts/bootstrap-oidc-and-graph.sh   # ADO WIF federated credential + Graph roles
 ├── tests/
 │   ├── conftest.py             # Shared fixtures
 │   ├── test_blueprint.py       # Enterprise orchestrator tests
